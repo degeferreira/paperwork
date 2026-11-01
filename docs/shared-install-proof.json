@@ -1,0 +1,16 @@
+{
+  "independent_of_relay": true,
+  "standard_library_available": true,
+  "original_sha256_verified": true,
+  "three_native_daily_notes": true,
+  "reimport_idempotent": true,
+  "local_tasks_without_vikunja": true,
+  "search": true,
+  "backup_verified": true,
+  "external_calls": false,
+  "shared_connections": true,
+  "relay_healthy": true,
+  "isolated_service": true,
+  "relay_port": 8088,
+  "paperwork_port": 8089
+}
