@@ -1,4 +1,21 @@
 {
+  "timezone": "UTC",
   "silverbullet_url": "http://127.0.0.1:3000",
-  "silverbullet_token_file": "/paperwork/secrets/silverbullet_token"
+  "silverbullet_token_file": "/run/secrets/silverbullet_token",
+  "vikunja": {
+    "url": "http://127.0.0.1:3456/api/v1",
+    "inbox_id": 1,
+    "token_file": "/run/secrets/vikunja_token"
+  },
+  "zotero": {
+    "user_id": null,
+    "group_id": null,
+    "key_file": "/run/secrets/zotero_key"
+  },
+  "daily_interval": 30,
+  "zotero_interval": 600,
+  "enabled": {
+    "daily": false,
+    "zotero": false
+  }
 }

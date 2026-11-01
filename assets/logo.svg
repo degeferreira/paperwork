@@ -1,7 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
-  <title id="title">Paperwork</title><desc id="desc">Uma folha dobrada com traço de caneta e um ponto de memória.</desc>
-  <rect width="128" height="128" rx="28" fill="#f3f1e9"/>
-  <path d="M39 27h34l18 18v50a6 6 0 0 1-6 6H39a6 6 0 0 1-6-6V33a6 6 0 0 1 6-6Z" fill="none" stroke="#153e35" stroke-width="5" stroke-linejoin="round"/>
-  <path d="M73 28v18h17M46 65h31M46 78h19" fill="none" stroke="#153e35" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="79" cy="89" r="6" fill="#b85d3b"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
+  <title id="title">Paperwork</title>
+  <desc id="desc">Uma folha de papel de traços simples, olhos tranquilos e um sorriso discreto.</desc>
+  <path d="M47 23h49l23 24v78a12 12 0 0 1-12 12H47a12 12 0 0 1-12-12V35a12 12 0 0 1 12-12Z" fill="#F6F4EB" stroke="#36594E" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M96 24v17a7 7 0 0 0 7 7h15" fill="#D5E5D5" stroke="#36594E" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M55 76q5 5 10 0m23 0q5 5 10 0" fill="none" stroke="#36594E" stroke-width="4" stroke-linecap="round"/>
+  <path d="M66 92q11 12 22 0" fill="none" stroke="#36594E" stroke-width="4" stroke-linecap="round"/>
+  <path d="M57 116h40" stroke="#BACDBD" stroke-width="3" stroke-linecap="round"/>
+  <path d="M126 100q11-10 18-8-1 11-14 15" fill="#D5E5D5"/>
+  <path d="m128 109 10-10" stroke="#6C8E7A" stroke-width="2.5" stroke-linecap="round"/>
 </svg>

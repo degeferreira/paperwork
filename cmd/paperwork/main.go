@@ -32,6 +32,7 @@ func run() error {
 		return err
 	}
 	defer handler.Close()
+	handler.StartIntegrationWorkers()
 	defer handler.Client.CloseIdleConnections()
 	server := &http.Server{
 		Addr: env("PAPERWORK_LISTEN", "127.0.0.1:8089"), Handler: handler,

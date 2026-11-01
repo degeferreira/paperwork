@@ -106,6 +106,13 @@ func Configuration() (map[string]any, error) {
 		z["key_file"] = credential("zotero_key")
 		config["zotero"] = z
 		config["__shared"] = true
+		for _, key := range []string{"daily_interval", "zotero_interval"} {
+			if _, ok := config[key]; !ok {
+				if v, found := source[key]; found {
+					config[key] = v
+				}
+			}
+		}
 	}
 	return config, nil
 }

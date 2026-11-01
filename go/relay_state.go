@@ -2,7 +2,9 @@ package paperwork
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 )
@@ -107,6 +109,10 @@ func (s *Store) MigrateRelayState(ctx context.Context, source *sql.DB) (RelayInv
 	if err != nil {
 		return inv, err
 	}
+	fingerprint, err := relayFingerprint(ctx, sourceTx)
+	if err != nil {
+		return inv, err
+	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return inv, err
@@ -122,6 +128,13 @@ CREATE TABLE IF NOT EXISTS relay_notes(source TEXT,identity TEXT,path TEXT,block
 	err = tx.QueryRowContext(ctx, "SELECT CAST(value AS INTEGER) FROM relay_state_meta WHERE key='migration_version'").Scan(&version)
 	if err == nil {
 		if version == relayStateVersion {
+			var previous string
+			if err = tx.QueryRowContext(ctx, "SELECT value FROM relay_state_meta WHERE key='source_sha256'").Scan(&previous); err != nil {
+				return inv, errors.New("migration source fingerprint missing; review required")
+			}
+			if previous != fingerprint {
+				return inv, errors.New("Relay source changed after migration; refusing to treat a different snapshot as a retry")
+			}
 			return inv, tx.Commit()
 		}
 		return inv, fmt.Errorf("unsupported Relay state version %d", version)
@@ -176,5 +189,45 @@ CREATE TABLE IF NOT EXISTS relay_notes(source TEXT,identity TEXT,path TEXT,block
 	if _, err = tx.ExecContext(ctx, "INSERT INTO relay_state_meta VALUES('migration_version',?)", fmt.Sprint(relayStateVersion)); err != nil {
 		return inv, err
 	}
+	if _, err = tx.ExecContext(ctx, "INSERT INTO relay_state_meta VALUES('source_sha256',?)", fingerprint); err != nil {
+		return inv, err
+	}
 	return inv, tx.Commit()
+}
+
+func relayFingerprint(ctx context.Context, tx *sql.Tx) (string, error) {
+	hash := sha256.New()
+	encoder := json.NewEncoder(hash)
+	for _, q := range []string{"SELECT key,value FROM kv ORDER BY key", "SELECT origin,task_id,phase,base,path,error FROM tasks ORDER BY origin", "SELECT source,identity,path,block_hash FROM notes ORDER BY source,identity"} {
+		rows, err := tx.QueryContext(ctx, q)
+		if err != nil {
+			return "", err
+		}
+		cols, err := rows.Columns()
+		if err != nil {
+			rows.Close()
+			return "", err
+		}
+		for rows.Next() {
+			values := make([]any, len(cols))
+			args := make([]any, len(cols))
+			for i := range values {
+				args[i] = &values[i]
+			}
+			if err = rows.Scan(args...); err != nil {
+				rows.Close()
+				return "", err
+			}
+			if err = encoder.Encode(values); err != nil {
+				rows.Close()
+				return "", err
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return "", err
+		}
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil)), nil
 }

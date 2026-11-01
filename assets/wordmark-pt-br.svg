@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 176" role="img" aria-labelledby="title desc">
+ <title id="title">Paperwork</title><desc id="desc">Marca Paperwork com uma folha serena e tipografia sóbria.</desc>
+ <rect width="640" height="176" rx="22" fill="#F6F4EB"/>
+ <g transform="translate(24 10) scale(.94)">
+ <path d="M47 23h49l23 24v78a12 12 0 0 1-12 12H47a12 12 0 0 1-12-12V35a12 12 0 0 1 12-12Z" fill="#fffefa" stroke="#36594E" stroke-width="3.5" stroke-linejoin="round"/>
+ <path d="M96 24v17a7 7 0 0 0 7 7h15" fill="#D5E5D5" stroke="#36594E" stroke-width="3.5" stroke-linejoin="round"/>
+ <path d="M56 77q4 4 8 0m24 0q4 4 8 0m-29 15q10 9 20 0" fill="none" stroke="#36594E" stroke-width="3" stroke-linecap="round"/>
+ </g>
+ <text x="170" y="91" fill="#29483D" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="49" font-weight="600" letter-spacing="-1.4">Paperwork</text>
+ <text x="172" y="123" fill="#52685D" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18">Espaço para pensar. Estrutura para lembrar.</text>
+</svg>

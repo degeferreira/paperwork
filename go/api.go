@@ -1,74 +1,692 @@
 package paperwork
 
 import (
- "context"
- "database/sql"
- "encoding/base64"
- "encoding/json"
- "errors"
- "fmt"
- "io"
- "mime"
- "net"
- "net/http"
- "os"
- "path/filepath"
- "regexp"
- "strings"
- "sync"
- "time"
- "unicode/utf8"
+	"context"
+	"database/sql"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"mime"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"sync"
+	"time"
+	"unicode/utf8"
 
- "github.com/google/uuid"
+	"github.com/degeferreira/paperwork/go/integration"
+	"github.com/google/uuid"
 )
+
 // Server serializes library mutations and external write workflows. Background OCR
 // releases the lock during HTTP calls and persists raw responses before proposing.
-type Server struct{Store *Store;Space Space;Tasks TaskConnector;TaskInstance string;Client *http.Client;BackupRoot string;mu sync.Mutex;jobMu sync.Mutex;busy bool;ctx context.Context;cancel context.CancelFunc;wg sync.WaitGroup;handler http.Handler}
-type apiError struct{Status int;Detail string}
-func(e *apiError)Error()string{return e.Detail}
-func bad(code int,detail string)error{return &apiError{code,detail}}
-func NewServer(store *Store)(*Server,error){ctx,cancel:=context.WithCancel(context.Background());s:=&Server{Store:store,Client:NewHTTPClient(180*time.Second),BackupRoot:env("PAPERWORK_BACKUP_ROOT",filepath.Join(filepath.Dir(store.Root),"paperwork-backups")),ctx:ctx,cancel:cancel};if _,e:=store.DB.Exec("UPDATE processing SET state='interrupted' WHERE state IN ('queued','transcribed')");e!=nil{cancel();return nil,e};s.routes();return s,nil}
-func(s *Server)Close(){s.cancel();s.wg.Wait()}
-func sendJSON(w http.ResponseWriter,status int,v any){w.Header().Set("Content-Type","application/json");w.WriteHeader(status);enc:=json.NewEncoder(w);enc.SetEscapeHTML(false);_ = enc.Encode(v)}
-func errorJSON(w http.ResponseWriter,e error){var a *apiError;var up *UpstreamError;switch{case errors.As(e,&a):sendJSON(w,a.Status,map[string]any{"detail":a.Detail});case errors.As(e,&up):if up.Status==412{sendJSON(w,409,map[string]any{"detail":"A note changed during incorporation. Wait for sync and retry the same proposal."})}else{var status any;if up.Status!=0{status=up.Status};sendJSON(w,502,map[string]any{"detail":"Upstream connection unavailable","upstream_status":status})};case errors.Is(e,sql.ErrNoRows),errors.Is(e,os.ErrNotExist):sendJSON(w,404,map[string]any{"detail":"Not Found"});default:sendJSON(w,500,map[string]any{"detail":"Internal Server Error"})}}
-func decode(w http.ResponseWriter,r *http.Request,out any,strict bool)error{limit:=int64(65536);if r.URL.Path=="/v1/paperwork/documents"{limit=24_100_000}else if strings.HasSuffix(r.URL.Path,"/propose"){limit=2_100_000};reader:=http.MaxBytesReader(w,r.Body,limit);d:=json.NewDecoder(reader);if strict{d.DisallowUnknownFields()};if e:=d.Decode(out);e!=nil{var max *http.MaxBytesError;if errors.As(e,&max){return bad(413,"Request body too large")};return bad(422,"Invalid request body")};var extra any;if e:=d.Decode(&extra);e!=io.EOF{var max *http.MaxBytesError;if errors.As(e,&max){return bad(413,"Request body too large")};return bad(422,"Invalid request body")};return nil}
-func(s *Server)endpoint(fn func(http.ResponseWriter,*http.Request)(any,error))http.HandlerFunc{return func(w http.ResponseWriter,r *http.Request){s.mu.Lock();defer s.mu.Unlock();v,e:=fn(w,r);if e!=nil{errorJSON(w,e);return};if v!=nil{sendJSON(w,200,v)}}}
-// ServeHTTP enforces the standalone Python server's loopback boundary.
-func(s *Server)ServeHTTP(w http.ResponseWriter,r *http.Request){host,_,e:=net.SplitHostPort(r.RemoteAddr);if e!=nil{host=r.RemoteAddr};if host!="127.0.0.1"&&host!="::1"{errorJSON(w,bad(403,"Loopback only"));return};if r.ContentLength>24_100_000{errorJSON(w,bad(413,"Request too large"));return};s.handler.ServeHTTP(w,r)}
-func(s *Server)space()(Space,error){if s.Space!=nil{return s.Space,nil};space,e:=NewSpaceConnection();if e!=nil{return nil,bad(503,"SilverBullet connection not configured")};return space,nil}
-func(s *Server)connector()(TaskConnector,string,error){if s.Tasks!=nil{return s.Tasks,s.TaskInstance,nil};c,e:=NewTaskConnection();if e!=nil{return nil,"",bad(503,"Vikunja connection not configured")};return c,c.URL,nil}
-func conflict(e error)error{if e==nil{return nil};var up *UpstreamError;if errors.As(e,&up)||errors.Is(e,sql.ErrNoRows){return e};return bad(409,e.Error())}
-type reviewRequest struct{Reviewed bool `json:"reviewed"`;RunID string `json:"run_id"`;AllowDuplicates bool `json:"allow_duplicates"`;ProjectID int `json:"project_id"`}
-func(s *Server)routes(){m:=http.NewServeMux();s.handler=m;s.registerZoteroSearch(m);p:="/v1/paperwork";on:=func(pattern string,fn func(http.ResponseWriter,*http.Request)(any,error)){m.HandleFunc(pattern,s.endpoint(fn))}
- on("GET /health/live",func(w http.ResponseWriter,r *http.Request)(any,error){return map[string]bool{"ok":true},nil})
- on("POST "+p+"/documents",func(w http.ResponseWriter,r *http.Request)(any,error){var body struct{Name string `json:"name"`;Data string `json:"data"`};if e:=decode(w,r,&body,false);e!=nil{return nil,e};if utf8.RuneCountInString(body.Name)<1||utf8.RuneCountInString(body.Name)>200||len(body.Data)>24_000_000{return nil,bad(422,"Invalid import")};if filepath.Base(body.Name)!=body.Name{return nil,bad(422,"Use a PDF or image filename")};ext:=strings.ToLower(filepath.Ext(body.Name));validExt:=ext==".pdf"||ext==".png"||ext==".jpg"||ext==".jpeg"||ext==".webp";if !validExt{return nil,bad(422,"Use a PDF or image filename")};if strings.ContainsAny(body.Data,"\n\r"){return nil,bad(422,"Invalid base64")};data,e:=base64.StdEncoding.Strict().DecodeString(body.Data);if e!=nil{return nil,bad(422,"Invalid base64")};ok:=false;switch ext{case ".pdf":ok=strings.HasPrefix(string(data),"%PDF-");case ".png":ok=strings.HasPrefix(string(data),"\x89PNG\r\n\x1a\n");case ".jpg",".jpeg":ok=strings.HasPrefix(string(data),"\xff\xd8\xff");case ".webp":ok=len(data)>=12&&string(data[:4])=="RIFF"&&string(data[8:12])=="WEBP"};if !ok{return nil,bad(422,"File extension does not match document signature")};folder,e:=os.MkdirTemp("","paperwork-import-");if e!=nil{return nil,e};defer os.RemoveAll(folder);path:=filepath.Join(folder,body.Name);if e=os.WriteFile(path,data,0600);e!=nil{return nil,e};id,e:=s.Store.Import(path);return map[string]any{"id":id,"name":body.Name},e})
- on("GET "+p+"/documents",func(w http.ResponseWriter,r *http.Request)(any,error){return queryMaps(s.Store.DB,"SELECT id,name FROM documents ORDER BY rowid DESC")})
- on("GET "+p+"/documents/{identity}",func(w http.ResponseWriter,r *http.Request)(any,error){id:=r.PathValue("identity");var name string;e:=s.Store.DB.QueryRow("SELECT name FROM documents WHERE id=?",id).Scan(&name);return map[string]any{"id":id,"name":name},e})
- on("GET "+p+"/documents/{identity}/original",func(w http.ResponseWriter,r *http.Request)(any,error){id:=r.PathValue("identity");if !identityRE.MatchString(id){return nil,sql.ErrNoRows};var name string;if e:=s.Store.DB.QueryRow("SELECT name FROM documents WHERE id=?",id).Scan(&name);e!=nil{return nil,e};w.Header().Set("Content-Type",mime.TypeByExtension(strings.ToLower(filepath.Ext(name))));w.Header().Set("Content-Disposition",mime.FormatMediaType("inline",map[string]string{"filename":name}));w.Header().Set("X-Content-Type-Options","nosniff");http.ServeFile(w,r,filepath.Join(s.Store.Originals,id));return nil,nil})
- on("POST "+p+"/documents/{identity}/propose",func(w http.ResponseWriter,r *http.Request)(any,error){var body struct{DefaultDate *string `json:"default_date"`;NoteTitle *string `json:"note_title"`;Pages []string `json:"pages"`};if e:=decode(w,r,&body,false);e!=nil{return nil,e};if len(body.Pages)<1||len(body.Pages)>500{return nil,bad(422,"Invalid pages")};total:=0;for _,v:=range body.Pages{total+=utf8.RuneCountInString(v)};if total>2_000_000{return nil,bad(413,"Request too large")};if body.DefaultDate!=nil&&body.NoteTitle!=nil{return nil,bad(422,"Choose a date or a note title, not both")};var context *string;if body.DefaultDate!=nil{if _,e:=time.Parse("2006-01-02",*body.DefaultDate);e!=nil{return nil,bad(422,"Invalid date")};context=ptr("Daily/"+*body.DefaultDate)};if body.NoteTitle!=nil{if utf8.RuneCountInString(*body.NoteTitle)>200{return nil,bad(422,"Invalid note title")};context=ptr("Page/"+*body.NoteTitle)};v,e:=s.Store.Propose(r.PathValue("identity"),body.Pages,context);if errors.Is(e,sql.ErrNoRows){return nil,bad(404,"Unknown document")};return v,e})
- on("GET "+p+"/documents/{identity}/proposal",func(w http.ResponseWriter,r *http.Request)(any,error){id:=r.PathValue("identity");_,raw,e:=s.Store.LoadProposal(id);if e!=nil{return nil,e};var out map[string]any;if e=json.Unmarshal([]byte(raw),&out);e!=nil{return nil,e};var pages,run string;e=s.Store.DB.QueryRow("SELECT pages,id FROM runs WHERE document_id=? ORDER BY rowid DESC LIMIT 1",id).Scan(&pages,&run);if e==nil{var v any;if e=json.Unmarshal([]byte(pages),&v);e!=nil{return nil,e};out["pages"]=v;out["run_id"]=run}else if e!=sql.ErrNoRows{return nil,e};return out,nil})
- on("GET "+p+"/search",func(w http.ResponseWriter,r *http.Request)(any,error){if !r.URL.Query().Has("q"){return nil,bad(422,"Query required")};q:=r.URL.Query().Get("q");if utf8.RuneCountInString(q)>200{return nil,bad(422,"Query too long")};return s.Store.Search(q)})
- on("POST "+p+"/documents/{identity}/markdown",func(w http.ResponseWriter,r *http.Request)(any,error){var body reviewRequest;if e:=decode(w,r,&body,false);e!=nil{return nil,e};if !body.Reviewed{return nil,bad(409,"Review acknowledgement required")};id:=r.PathValue("identity");proposal,_,e:=s.Store.LoadProposal(id);if e!=nil{return nil,e};notes,e:=Render(proposal,id,nil,nil);return map[string]any{"notes":notes},conflict(e)})
- on("POST "+p+"/documents/{identity}/incorporate",func(w http.ResponseWriter,r *http.Request)(any,error){var body reviewRequest;if e:=decode(w,r,&body,false);e!=nil{return nil,e};if !body.Reviewed{return nil,bad(409,"Review acknowledgement required")};space,e:=s.space();if e!=nil{return nil,e};v,e:=s.Store.IncorporateReviewed(r.Context(),r.PathValue("identity"),body.RunID,body.AllowDuplicates,space);return v,conflict(e)})
- on("POST "+p+"/documents/{identity}/tasks/export",func(w http.ResponseWriter,r *http.Request)(any,error){var body reviewRequest;if e:=decode(w,r,&body,false);e!=nil{return nil,e};if body.ProjectID<=0{return nil,bad(422,"Invalid project ID")};if !body.Reviewed{return nil,bad(409,"Review acknowledgement required")};connector,instance,e:=s.connector();if e!=nil{return nil,e};id:=r.PathValue("identity");proposal,_,e:=s.Store.LoadProposal(id);if e!=nil{return nil,e};if e=s.Store.CheckRevision(id,body.RunID);e!=nil{return nil,conflict(e)};if len(proposal.PossibleDuplicates)>0&&!body.AllowDuplicates{return nil,bad(409,"Review possible duplicate segments before exporting tasks")};tasks,e:=s.Store.ExportTasks(r.Context(),proposal,connector,instance,body.ProjectID);if e!=nil{return nil,conflict(e)};updates,e:=s.Store.ApplyUpdates(r.Context(),proposal,connector,instance);return map[string]any{"tasks":tasks,"updates":updates},conflict(e)})
- on("GET "+p+"/tasks",func(w http.ResponseWriter,r *http.Request)(any,error){rows,e:=queryMaps(s.Store.DB,"SELECT t.block_id,t.task_id,t.instance,t.remote_id,t.phase,COALESCE(NULLIF(d.title,''),t.task_id) AS title,d.done FROM tasks t LEFT JOIN task_data d ON t.block_id=d.block_id ORDER BY t.rowid DESC LIMIT 500");for _,v:=range rows{v["done"]=number(v["done"])!=0};return rows,e})
- on("PATCH "+p+"/tasks/{identity}",func(w http.ResponseWriter,r *http.Request)(any,error){var body struct{Done *bool `json:"done"`};if e:=decode(w,r,&body,false);e!=nil{return nil,e};if body.Done==nil{return nil,bad(422,"Done required")};id:=r.PathValue("identity");var block string;if e:=s.Store.DB.QueryRow("SELECT block_id FROM tasks WHERE task_id=?",id).Scan(&block);e!=nil{return nil,e};tx,e:=s.Store.DB.Begin();if e!=nil{return nil,e};defer tx.Rollback();if _,e=tx.Exec("UPDATE task_data SET done=? WHERE block_id=?",*body.Done,block);e!=nil{return nil,e};if _,e=tx.Exec("UPDATE tasks SET phase='pending-update' WHERE task_id=?",id);e!=nil{return nil,e};return map[string]any{"task_id":id,"done":*body.Done,"remote_pending":true},tx.Commit()})
- on("PUT "+p+"/documents/{identity}/policy",func(w http.ResponseWriter,r *http.Request)(any,error){body:=struct{LocalOnly bool `json:"local_only"`}{true};if e:=decode(w,r,&body,false);e!=nil{return nil,e};id:=r.PathValue("identity");var found int;if e:=s.Store.DB.QueryRow("SELECT 1 FROM documents WHERE id=?",id).Scan(&found);e!=nil{return nil,e};e:=s.Store.DB.QueryRow("SELECT 1 FROM processing WHERE document_id=? AND state IN ('queued','transcribed')",id).Scan(&found);if e==nil{return nil,bad(409,"Wait for current processing before changing policy")};if e!=sql.ErrNoRows{return nil,e};_,e=s.Store.DB.Exec("UPDATE document_metadata SET local_only=? WHERE document_id=?",body.LocalOnly,id);return map[string]any{"local_only":body.LocalOnly},e})
- on("GET "+p+"/jobs",func(w http.ResponseWriter,r *http.Request)(any,error){return queryMaps(s.Store.DB,`SELECT id,document_id AS document,state,json_extract(detail,'$.error') AS error,json_extract(detail,'$.status_code') AS status_code FROM processing ORDER BY rowid DESC LIMIT 100`)})
- on("POST "+p+"/documents/{identity}/transcribe",s.queueTranscription)
- on("GET "+p+"/references",func(w http.ResponseWriter,r *http.Request)(any,error){return queryMaps(s.Store.DB,"SELECT alias,library_type,library_id,item_key,note_path FROM reference_aliases WHERE retired=0 ORDER BY alias")})
- on("POST "+p+"/references",func(w http.ResponseWriter,r *http.Request)(any,error){var a Alias;if e:=decode(w,r,&a,false);e!=nil{return nil,e};if e:=s.Store.RegisterAliases([]Alias{a});e!=nil{return nil,conflict(e)};return map[string]any{"alias":a.Alias,"library_type":a.LibraryType,"library_id":a.LibraryID,"item_key":a.ItemKey},nil})
- on("POST "+p+"/references/index",func(w http.ResponseWriter,r *http.Request)(any,error){var body struct{Format string `json:"format"`;References []Alias `json:"references"`};if e:=decode(w,r,&body,false);e!=nil{return nil,e};if body.Format!="paperwork-zotero-aliases-v1"{return nil,bad(422,"Unknown alias index format")};if len(body.References)<1||len(body.References)>200{return nil,bad(422,"Invalid reference batch")};if e:=s.Store.RegisterAliases(body.References);e!=nil{return nil,conflict(e)};return map[string]any{"imported":len(body.References)},nil})
- on("GET "+p+"/documents/{identity}/references",func(w http.ResponseWriter,r *http.Request)(any,error){proposal,_,e:=s.Store.LoadProposal(r.PathValue("identity"));if e!=nil{return nil,e};return s.Store.Resolve(proposal)})
- on("POST "+p+"/references/{alias}/import",func(w http.ResponseWriter,r *http.Request)(any,error){v,e:=s.Store.ImportReference(r.Context(),r.PathValue("alias"),s.Space,s.Client);return v,conflict(e)})
- on("GET "+p+"/settings",func(w http.ResponseWriter,r *http.Request)(any,error){return GetSettings()})
- on("PUT "+p+"/settings",func(w http.ResponseWriter,r *http.Request)(any,error){body:=DefaultSettings();if e:=decode(w,r,&body,true);e!=nil{return nil,e};if e:=SaveSettings(body);e!=nil{if errors.Is(e,ErrShared){return nil,bad(409,e.Error())};return nil,bad(422,e.Error())};return map[string]bool{"saved":true},nil})
- on("PUT "+p+"/settings/secrets/{name}",func(w http.ResponseWriter,r *http.Request)(any,error){var body struct{Value string `json:"value"`};if e:=decode(w,r,&body,false);e!=nil{return nil,e};if e:=SaveCredential(r.PathValue("name"),body.Value);e!=nil{if errors.Is(e,os.ErrNotExist){return nil,e};if strings.HasPrefix(e.Error(),"Configure shared"){return nil,bad(409,e.Error())};return nil,bad(422,"Invalid credential")};return map[string]bool{"saved":true},nil})
- on("POST "+p+"/daily/open",func(w http.ResponseWriter,r *http.Request)(any,error){space,e:=s.space();if e!=nil{return nil,e};config,e:=Configuration();if e!=nil{return nil,e};zone:=stringValue(config["timezone"]);if zone==""{zone="UTC"};loc,e:=time.LoadLocation(zone);if e!=nil{return nil,bad(503,"Configure SilverBullet connection and timezone")};day:=time.Now().In(loc).Format("2006-01-02");path:="Daily/"+day+".md";existing,_,e:=space.Read(r.Context(),path);if e!=nil{return nil,e};if existing==nil{if e=space.Write(r.Context(),path,"---\ntype: daily\ndate: "+day+"\n---\n\n# "+day+"\n\n","");e!=nil{return nil,e}};return map[string]any{"path":strings.TrimSuffix(path,".md")},nil})
- on("POST "+p+"/backups",func(w http.ResponseWriter,r *http.Request)(any,error){var body struct{Name string `json:"name"`};if e:=decode(w,r,&body,false);e!=nil{return nil,e};if len(body.Name)>100||!regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`).MatchString(body.Name){return nil,bad(422,"Invalid snapshot name")};space,e:=s.space();if e!=nil{return nil,e};destination:=filepath.Join(s.BackupRoot,body.Name);if _,e=os.Lstat(destination);e==nil{return nil,bad(409,"Snapshot name already exists")};v,e:=s.Store.BackupWithNotes(r.Context(),space,destination);return v,conflict(e)})
+type Server struct {
+	Integration  *integration.Service
+	Store        *Store
+	Space        Space
+	Tasks        TaskConnector
+	TaskInstance string
+	Client       *http.Client
+	BackupRoot   string
+	mu           sync.Mutex
+	jobMu        sync.Mutex
+	busy         bool
+	ctx          context.Context
+	cancel       context.CancelFunc
+	wg           sync.WaitGroup
+	handler      http.Handler
 }
-func(s *Server)queueTranscription(w http.ResponseWriter,r *http.Request)(any,error){var body struct{Consent bool `json:"consent_external"`};if e:=decode(w,r,&body,false);e!=nil{return nil,e};id:=r.PathValue("identity");var name string;if e:=s.Store.DB.QueryRow("SELECT name FROM documents WHERE id=?",id).Scan(&name);e!=nil{return nil,e};config,e:=Configuration();if e!=nil{return nil,e};var c TranscriptionConfig;if e=decodeObject(config["transcription"],&c);e!=nil{return nil,e};if !supportedProvider(c.Provider)||c.Provider=="manual"{return nil,bad(503,"Configure a transcription provider first; manual transcription remains available")};if ExternalProvider(c){var local int;e:=s.Store.DB.QueryRow("SELECT local_only FROM document_metadata WHERE document_id=?",id).Scan(&local);if e!=nil||local!=0||!body.Consent||!c.ExternalAllowed{return nil,bad(409,"Document is local-only or external transmission was not authorized")}}
- s.jobMu.Lock();defer s.jobMu.Unlock();if s.busy{return nil,bad(409,"A transcription is already running")};job:=uuid.NewString();metadata:=map[string]any{"provider":c.Provider,"model":c.Model,"prompt":Prompt,"prompt_version":PromptVersion,"input_sha256":id,"consent_external":body.Consent,"cost":nil};raw,e:=json.Marshal(metadata);if e!=nil{return nil,e};if _,e=s.Store.DB.Exec("INSERT INTO processing VALUES (?,?,'queued',?)",job,id,string(raw));e!=nil{return nil,e};s.busy=true;s.wg.Add(1);go s.runTranscription(id,name,job,c,body.Consent,metadata);return map[string]any{"job":job,"state":"queued"},nil}
-func(s *Server)runTranscription(id,name,job string,c TranscriptionConfig,consent bool,detail map[string]any){defer s.wg.Done();defer func(){s.jobMu.Lock();s.busy=false;s.jobMu.Unlock()}();data,e:=os.ReadFile(filepath.Join(s.Store.Originals,id));var result TranscriptionResult;if e==nil{kind:=mime.TypeByExtension(strings.ToLower(filepath.Ext(name)));if kind==""{kind="application/octet-stream"};result,e=Transcribe(s.ctx,data,kind,c,s.Client,consent)};s.mu.Lock();defer s.mu.Unlock();if e==nil{var fields map[string]any;if e=decodeObject(result,&fields);e==nil{for k,v:=range fields{detail[k]=v};var raw []byte;raw,e=json.Marshal(detail);if e==nil{_,e=s.Store.DB.Exec("UPDATE processing SET state='transcribed',detail=? WHERE id=?",string(raw),job)}};if e==nil{var proposal Proposal;proposal,e=s.Store.Propose(id,result.Pages,nil);if e==nil{detail["run_id"]=proposal.RunID;raw,err:=json.Marshal(detail);e=err;if e==nil{_,e=s.Store.DB.Exec("UPDATE processing SET state='review',detail=? WHERE id=?",string(raw),job)}}}}
- if e!=nil{state:="error";detail["error"]="ValueError";var up *UpstreamError;if errors.As(e,&up){detail["error"]="HTTPError";if up.Status!=0{detail["error"]="HTTPStatusError";detail["status_code"]=up.Status}};if s.ctx.Err()!=nil{state="interrupted";delete(detail,"error")};raw,err:=json.Marshal(detail);if err==nil{_,_=s.Store.DB.Exec("UPDATE processing SET state=?,detail=? WHERE id=?",state,string(raw),job)}}}
-var _=fmt.Sprint
+type apiError struct {
+	Status int
+	Detail string
+}
+
+func (e *apiError) Error() string       { return e.Detail }
+func bad(code int, detail string) error { return &apiError{code, detail} }
+func NewServer(store *Store) (*Server, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &Server{Store: store, Client: NewHTTPClient(180 * time.Second), BackupRoot: env("PAPERWORK_BACKUP_ROOT", filepath.Join(filepath.Dir(store.Root), "paperwork-backups")), ctx: ctx, cancel: cancel}
+	if _, e := store.DB.Exec("UPDATE processing SET state='interrupted' WHERE state IN ('queued','transcribed')"); e != nil {
+		cancel()
+		return nil, e
+	}
+	if e := s.initializeIntegration(); e != nil {
+		cancel()
+		return nil, e
+	}
+	s.routes()
+	return s, nil
+}
+func (s *Server) Close() { s.cancel(); s.wg.Wait() }
+func sendJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(v)
+}
+func errorJSON(w http.ResponseWriter, e error) {
+	var a *apiError
+	var up *UpstreamError
+	var legacy *integration.Error
+	var legacyUp *integration.UpstreamError
+	switch {
+	case errors.As(e, &legacy):
+		sendJSON(w, legacy.Status, map[string]any{"detail": legacy.Detail})
+	case errors.As(e, &legacyUp):
+		sendJSON(w, 502, map[string]any{"detail": "Upstream connection unavailable"})
+	case errors.As(e, &a):
+		sendJSON(w, a.Status, map[string]any{"detail": a.Detail})
+	case errors.As(e, &up):
+		if up.Status == 412 {
+			sendJSON(w, 409, map[string]any{"detail": "A note changed during incorporation. Wait for sync and retry the same proposal."})
+		} else {
+			var status any
+			if up.Status != 0 {
+				status = up.Status
+			}
+			sendJSON(w, 502, map[string]any{"detail": "Upstream connection unavailable", "upstream_status": status})
+		}
+	case errors.Is(e, sql.ErrNoRows), errors.Is(e, os.ErrNotExist):
+		sendJSON(w, 404, map[string]any{"detail": "Not Found"})
+	default:
+		sendJSON(w, 500, map[string]any{"detail": "Internal Server Error"})
+	}
+}
+func decode(w http.ResponseWriter, r *http.Request, out any, strict bool) error {
+	limit := int64(65536)
+	if r.URL.Path == "/v1/paperwork/documents" {
+		limit = 24_100_000
+	} else if strings.HasSuffix(r.URL.Path, "/propose") {
+		limit = 2_100_000
+	}
+	reader := http.MaxBytesReader(w, r.Body, limit)
+	d := json.NewDecoder(reader)
+	if strict {
+		d.DisallowUnknownFields()
+	}
+	if e := d.Decode(out); e != nil {
+		var max *http.MaxBytesError
+		if errors.As(e, &max) {
+			return bad(413, "Request body too large")
+		}
+		return bad(422, "Invalid request body")
+	}
+	var extra any
+	if e := d.Decode(&extra); e != io.EOF {
+		var max *http.MaxBytesError
+		if errors.As(e, &max) {
+			return bad(413, "Request body too large")
+		}
+		return bad(422, "Invalid request body")
+	}
+	return nil
+}
+func (s *Server) endpoint(fn func(http.ResponseWriter, *http.Request) (any, error)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		v, e := fn(w, r)
+		if e != nil {
+			errorJSON(w, e)
+			return
+		}
+		if v != nil {
+			sendJSON(w, 200, v)
+		}
+	}
+}
+
+// ServeHTTP enforces the standalone Python server's loopback boundary.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	host, _, e := net.SplitHostPort(r.RemoteAddr)
+	if e != nil {
+		host = r.RemoteAddr
+	}
+	if host != "127.0.0.1" && host != "::1" {
+		errorJSON(w, bad(403, "Loopback only"))
+		return
+	}
+	if r.ContentLength > 24_100_000 {
+		errorJSON(w, bad(413, "Request too large"))
+		return
+	}
+	s.handler.ServeHTTP(w, r)
+}
+func (s *Server) space() (Space, error) {
+	if s.Space != nil {
+		return s.Space, nil
+	}
+	space, e := NewSpaceConnection()
+	if e != nil {
+		return nil, bad(503, "SilverBullet connection not configured")
+	}
+	return space, nil
+}
+func (s *Server) connector() (TaskConnector, string, error) {
+	if s.Tasks != nil {
+		return s.Tasks, s.TaskInstance, nil
+	}
+	c, e := NewTaskConnection()
+	if e != nil {
+		return nil, "", bad(503, "Vikunja connection not configured")
+	}
+	return c, c.URL, nil
+}
+func conflict(e error) error {
+	if e == nil {
+		return nil
+	}
+	var up *UpstreamError
+	if errors.As(e, &up) || errors.Is(e, sql.ErrNoRows) {
+		return e
+	}
+	return bad(409, e.Error())
+}
+
+type reviewRequest struct {
+	Reviewed        bool   `json:"reviewed"`
+	RunID           string `json:"run_id"`
+	AllowDuplicates bool   `json:"allow_duplicates"`
+	ProjectID       int    `json:"project_id"`
+}
+
+func (s *Server) routes() {
+	m := http.NewServeMux()
+	s.handler = m
+	s.registerIntegration(m)
+	p := "/v1/paperwork"
+	on := func(pattern string, fn func(http.ResponseWriter, *http.Request) (any, error)) {
+		m.HandleFunc(pattern, s.endpoint(fn))
+	}
+	on("GET /health/live", func(w http.ResponseWriter, r *http.Request) (any, error) { return map[string]bool{"ok": true}, nil })
+	on("POST "+p+"/documents", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var body struct {
+			Name string `json:"name"`
+			Data string `json:"data"`
+		}
+		if e := decode(w, r, &body, false); e != nil {
+			return nil, e
+		}
+		if utf8.RuneCountInString(body.Name) < 1 || utf8.RuneCountInString(body.Name) > 200 || len(body.Data) > 24_000_000 {
+			return nil, bad(422, "Invalid import")
+		}
+		if filepath.Base(body.Name) != body.Name {
+			return nil, bad(422, "Use a PDF or image filename")
+		}
+		ext := strings.ToLower(filepath.Ext(body.Name))
+		validExt := ext == ".pdf" || ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".webp"
+		if !validExt {
+			return nil, bad(422, "Use a PDF or image filename")
+		}
+		if strings.ContainsAny(body.Data, "\n\r") {
+			return nil, bad(422, "Invalid base64")
+		}
+		data, e := base64.StdEncoding.Strict().DecodeString(body.Data)
+		if e != nil {
+			return nil, bad(422, "Invalid base64")
+		}
+		ok := false
+		switch ext {
+		case ".pdf":
+			ok = strings.HasPrefix(string(data), "%PDF-")
+		case ".png":
+			ok = strings.HasPrefix(string(data), "\x89PNG\r\n\x1a\n")
+		case ".jpg", ".jpeg":
+			ok = strings.HasPrefix(string(data), "\xff\xd8\xff")
+		case ".webp":
+			ok = len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP"
+		}
+		if !ok {
+			return nil, bad(422, "File extension does not match document signature")
+		}
+		folder, e := os.MkdirTemp("", "paperwork-import-")
+		if e != nil {
+			return nil, e
+		}
+		defer os.RemoveAll(folder)
+		path := filepath.Join(folder, body.Name)
+		if e = os.WriteFile(path, data, 0600); e != nil {
+			return nil, e
+		}
+		id, e := s.Store.Import(path)
+		return map[string]any{"id": id, "name": body.Name}, e
+	})
+	on("GET "+p+"/documents", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return queryMaps(s.Store.DB, "SELECT id,name FROM documents ORDER BY rowid DESC")
+	})
+	on("GET "+p+"/documents/{identity}", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		id := r.PathValue("identity")
+		var name string
+		e := s.Store.DB.QueryRow("SELECT name FROM documents WHERE id=?", id).Scan(&name)
+		return map[string]any{"id": id, "name": name}, e
+	})
+	on("GET "+p+"/documents/{identity}/original", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		id := r.PathValue("identity")
+		if !identityRE.MatchString(id) {
+			return nil, sql.ErrNoRows
+		}
+		var name string
+		if e := s.Store.DB.QueryRow("SELECT name FROM documents WHERE id=?", id).Scan(&name); e != nil {
+			return nil, e
+		}
+		w.Header().Set("Content-Type", mime.TypeByExtension(strings.ToLower(filepath.Ext(name))))
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": name}))
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		http.ServeFile(w, r, filepath.Join(s.Store.Originals, id))
+		return nil, nil
+	})
+	on("POST "+p+"/documents/{identity}/propose", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var body struct {
+			DefaultDate *string  `json:"default_date"`
+			NoteTitle   *string  `json:"note_title"`
+			Pages       []string `json:"pages"`
+		}
+		if e := decode(w, r, &body, false); e != nil {
+			return nil, e
+		}
+		if len(body.Pages) < 1 || len(body.Pages) > 500 {
+			return nil, bad(422, "Invalid pages")
+		}
+		total := 0
+		for _, v := range body.Pages {
+			total += utf8.RuneCountInString(v)
+		}
+		if total > 2_000_000 {
+			return nil, bad(413, "Request too large")
+		}
+		if body.DefaultDate != nil && body.NoteTitle != nil {
+			return nil, bad(422, "Choose a date or a note title, not both")
+		}
+		var context *string
+		if body.DefaultDate != nil {
+			if _, e := time.Parse("2006-01-02", *body.DefaultDate); e != nil {
+				return nil, bad(422, "Invalid date")
+			}
+			context = ptr("Daily/" + *body.DefaultDate)
+		}
+		if body.NoteTitle != nil {
+			if utf8.RuneCountInString(*body.NoteTitle) > 200 {
+				return nil, bad(422, "Invalid note title")
+			}
+			context = ptr("Page/" + *body.NoteTitle)
+		}
+		v, e := s.Store.Propose(r.PathValue("identity"), body.Pages, context)
+		if errors.Is(e, sql.ErrNoRows) {
+			return nil, bad(404, "Unknown document")
+		}
+		return v, e
+	})
+	on("GET "+p+"/documents/{identity}/proposal", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		id := r.PathValue("identity")
+		_, raw, e := s.Store.LoadProposal(id)
+		if e != nil {
+			return nil, e
+		}
+		var out map[string]any
+		if e = json.Unmarshal([]byte(raw), &out); e != nil {
+			return nil, e
+		}
+		var pages, run string
+		e = s.Store.DB.QueryRow("SELECT pages,id FROM runs WHERE document_id=? ORDER BY rowid DESC LIMIT 1", id).Scan(&pages, &run)
+		if e == nil {
+			var v any
+			if e = json.Unmarshal([]byte(pages), &v); e != nil {
+				return nil, e
+			}
+			out["pages"] = v
+			out["run_id"] = run
+		} else if e != sql.ErrNoRows {
+			return nil, e
+		}
+		return out, nil
+	})
+	on("GET "+p+"/search", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		if !r.URL.Query().Has("q") {
+			return nil, bad(422, "Query required")
+		}
+		q := r.URL.Query().Get("q")
+		if utf8.RuneCountInString(q) > 200 {
+			return nil, bad(422, "Query too long")
+		}
+		return s.Store.Search(q)
+	})
+	on("POST "+p+"/documents/{identity}/markdown", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var body reviewRequest
+		if e := decode(w, r, &body, false); e != nil {
+			return nil, e
+		}
+		if !body.Reviewed {
+			return nil, bad(409, "Review acknowledgement required")
+		}
+		id := r.PathValue("identity")
+		proposal, _, e := s.Store.LoadProposal(id)
+		if e != nil {
+			return nil, e
+		}
+		notes, e := Render(proposal, id, nil, nil)
+		return map[string]any{"notes": notes}, conflict(e)
+	})
+	on("POST "+p+"/documents/{identity}/incorporate", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var body reviewRequest
+		if e := decode(w, r, &body, false); e != nil {
+			return nil, e
+		}
+		if !body.Reviewed {
+			return nil, bad(409, "Review acknowledgement required")
+		}
+		space, e := s.space()
+		if e != nil {
+			return nil, e
+		}
+		v, e := s.Store.IncorporateReviewed(r.Context(), r.PathValue("identity"), body.RunID, body.AllowDuplicates, space)
+		return v, conflict(e)
+	})
+	on("POST "+p+"/documents/{identity}/tasks/export", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var body reviewRequest
+		if e := decode(w, r, &body, false); e != nil {
+			return nil, e
+		}
+		if body.ProjectID <= 0 {
+			return nil, bad(422, "Invalid project ID")
+		}
+		if !body.Reviewed {
+			return nil, bad(409, "Review acknowledgement required")
+		}
+		connector, instance, e := s.connector()
+		if e != nil {
+			return nil, e
+		}
+		id := r.PathValue("identity")
+		proposal, _, e := s.Store.LoadProposal(id)
+		if e != nil {
+			return nil, e
+		}
+		if e = s.Store.CheckRevision(id, body.RunID); e != nil {
+			return nil, conflict(e)
+		}
+		if len(proposal.PossibleDuplicates) > 0 && !body.AllowDuplicates {
+			return nil, bad(409, "Review possible duplicate segments before exporting tasks")
+		}
+		tasks, e := s.Store.ExportTasks(r.Context(), proposal, connector, instance, body.ProjectID)
+		if e != nil {
+			return nil, conflict(e)
+		}
+		updates, e := s.Store.ApplyUpdates(r.Context(), proposal, connector, instance)
+		return map[string]any{"tasks": tasks, "updates": updates}, conflict(e)
+	})
+	on("GET "+p+"/tasks", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		rows, e := queryMaps(s.Store.DB, "SELECT t.block_id,t.task_id,t.instance,t.remote_id,t.phase,COALESCE(NULLIF(d.title,''),t.task_id) AS title,d.done FROM tasks t LEFT JOIN task_data d ON t.block_id=d.block_id ORDER BY t.rowid DESC LIMIT 500")
+		for _, v := range rows {
+			v["done"] = number(v["done"]) != 0
+		}
+		return rows, e
+	})
+	on("PATCH "+p+"/tasks/{identity}", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var body struct {
+			Done *bool `json:"done"`
+		}
+		if e := decode(w, r, &body, false); e != nil {
+			return nil, e
+		}
+		if body.Done == nil {
+			return nil, bad(422, "Done required")
+		}
+		id := r.PathValue("identity")
+		var block string
+		if e := s.Store.DB.QueryRow("SELECT block_id FROM tasks WHERE task_id=?", id).Scan(&block); e != nil {
+			return nil, e
+		}
+		tx, e := s.Store.DB.Begin()
+		if e != nil {
+			return nil, e
+		}
+		defer tx.Rollback()
+		if _, e = tx.Exec("UPDATE task_data SET done=? WHERE block_id=?", *body.Done, block); e != nil {
+			return nil, e
+		}
+		if _, e = tx.Exec("UPDATE tasks SET phase='pending-update' WHERE task_id=?", id); e != nil {
+			return nil, e
+		}
+		return map[string]any{"task_id": id, "done": *body.Done, "remote_pending": true}, tx.Commit()
+	})
+	on("PUT "+p+"/documents/{identity}/policy", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		body := struct {
+			LocalOnly bool `json:"local_only"`
+		}{true}
+		if e := decode(w, r, &body, false); e != nil {
+			return nil, e
+		}
+		id := r.PathValue("identity")
+		var found int
+		if e := s.Store.DB.QueryRow("SELECT 1 FROM documents WHERE id=?", id).Scan(&found); e != nil {
+			return nil, e
+		}
+		e := s.Store.DB.QueryRow("SELECT 1 FROM processing WHERE document_id=? AND state IN ('queued','transcribed')", id).Scan(&found)
+		if e == nil {
+			return nil, bad(409, "Wait for current processing before changing policy")
+		}
+		if e != sql.ErrNoRows {
+			return nil, e
+		}
+		_, e = s.Store.DB.Exec("UPDATE document_metadata SET local_only=? WHERE document_id=?", body.LocalOnly, id)
+		return map[string]any{"local_only": body.LocalOnly}, e
+	})
+	on("GET "+p+"/jobs", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return queryMaps(s.Store.DB, `SELECT id,document_id AS document,state,json_extract(detail,'$.error') AS error,json_extract(detail,'$.status_code') AS status_code FROM processing ORDER BY rowid DESC LIMIT 100`)
+	})
+	on("POST "+p+"/documents/{identity}/transcribe", s.queueTranscription)
+	on("GET "+p+"/references", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return queryMaps(s.Store.DB, "SELECT alias,library_type,library_id,item_key,note_path FROM reference_aliases WHERE retired=0 ORDER BY alias")
+	})
+	on("POST "+p+"/references", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var a Alias
+		if e := decode(w, r, &a, false); e != nil {
+			return nil, e
+		}
+		if e := s.Store.RegisterAliases([]Alias{a}); e != nil {
+			return nil, conflict(e)
+		}
+		return map[string]any{"alias": a.Alias, "library_type": a.LibraryType, "library_id": a.LibraryID, "item_key": a.ItemKey}, nil
+	})
+	on("POST "+p+"/references/index", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var body struct {
+			Format     string  `json:"format"`
+			References []Alias `json:"references"`
+		}
+		if e := decode(w, r, &body, false); e != nil {
+			return nil, e
+		}
+		if body.Format != "paperwork-zotero-aliases-v1" {
+			return nil, bad(422, "Unknown alias index format")
+		}
+		if len(body.References) < 1 || len(body.References) > 200 {
+			return nil, bad(422, "Invalid reference batch")
+		}
+		if e := s.Store.RegisterAliases(body.References); e != nil {
+			return nil, conflict(e)
+		}
+		return map[string]any{"imported": len(body.References)}, nil
+	})
+	on("GET "+p+"/documents/{identity}/references", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		proposal, _, e := s.Store.LoadProposal(r.PathValue("identity"))
+		if e != nil {
+			return nil, e
+		}
+		return s.Store.Resolve(proposal)
+	})
+	on("POST "+p+"/references/{alias}/import", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		v, e := s.Store.ImportReference(r.Context(), r.PathValue("alias"), s.Space, s.Client)
+		return v, conflict(e)
+	})
+	on("GET "+p+"/settings", func(w http.ResponseWriter, r *http.Request) (any, error) { return GetSettings() })
+	on("PUT "+p+"/settings", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		body := DefaultSettings()
+		if e := decode(w, r, &body, true); e != nil {
+			return nil, e
+		}
+		if e := SaveSettings(body); e != nil {
+			if errors.Is(e, ErrShared) {
+				return nil, bad(409, e.Error())
+			}
+			return nil, bad(422, e.Error())
+		}
+		return map[string]bool{"saved": true}, nil
+	})
+	on("PUT "+p+"/settings/secrets/{name}", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var body struct {
+			Value string `json:"value"`
+		}
+		if e := decode(w, r, &body, false); e != nil {
+			return nil, e
+		}
+		if e := SaveCredential(r.PathValue("name"), body.Value); e != nil {
+			if errors.Is(e, os.ErrNotExist) {
+				return nil, e
+			}
+			if strings.HasPrefix(e.Error(), "Configure shared") {
+				return nil, bad(409, e.Error())
+			}
+			return nil, bad(422, "Invalid credential")
+		}
+		return map[string]bool{"saved": true}, nil
+	})
+
+	on("POST "+p+"/backups", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var body struct {
+			Name string `json:"name"`
+		}
+		if e := decode(w, r, &body, false); e != nil {
+			return nil, e
+		}
+		if len(body.Name) > 100 || !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`).MatchString(body.Name) {
+			return nil, bad(422, "Invalid snapshot name")
+		}
+		space, e := s.space()
+		if e != nil {
+			return nil, e
+		}
+		destination := filepath.Join(s.BackupRoot, body.Name)
+		if _, e = os.Lstat(destination); e == nil {
+			return nil, bad(409, "Snapshot name already exists")
+		}
+		v, e := s.Store.BackupWithNotes(r.Context(), space, destination)
+		return v, conflict(e)
+	})
+}
+func (s *Server) queueTranscription(w http.ResponseWriter, r *http.Request) (any, error) {
+	var body struct {
+		Consent bool `json:"consent_external"`
+	}
+	if e := decode(w, r, &body, false); e != nil {
+		return nil, e
+	}
+	id := r.PathValue("identity")
+	var name string
+	if e := s.Store.DB.QueryRow("SELECT name FROM documents WHERE id=?", id).Scan(&name); e != nil {
+		return nil, e
+	}
+	config, e := Configuration()
+	if e != nil {
+		return nil, e
+	}
+	var c TranscriptionConfig
+	if e = decodeObject(config["transcription"], &c); e != nil {
+		return nil, e
+	}
+	if !supportedProvider(c.Provider) || c.Provider == "manual" {
+		return nil, bad(503, "Configure a transcription provider first; manual transcription remains available")
+	}
+	if ExternalProvider(c) {
+		var local int
+		e := s.Store.DB.QueryRow("SELECT local_only FROM document_metadata WHERE document_id=?", id).Scan(&local)
+		if e != nil || local != 0 || !body.Consent || !c.ExternalAllowed {
+			return nil, bad(409, "Document is local-only or external transmission was not authorized")
+		}
+	}
+	s.jobMu.Lock()
+	defer s.jobMu.Unlock()
+	if s.busy {
+		return nil, bad(409, "A transcription is already running")
+	}
+	job := uuid.NewString()
+	metadata := map[string]any{"provider": c.Provider, "model": c.Model, "prompt": Prompt, "prompt_version": PromptVersion, "input_sha256": id, "consent_external": body.Consent, "cost": nil}
+	raw, e := json.Marshal(metadata)
+	if e != nil {
+		return nil, e
+	}
+	if _, e = s.Store.DB.Exec("INSERT INTO processing VALUES (?,?,'queued',?)", job, id, string(raw)); e != nil {
+		return nil, e
+	}
+	s.busy = true
+	s.wg.Add(1)
+	go s.runTranscription(id, name, job, c, body.Consent, metadata)
+	return map[string]any{"job": job, "state": "queued"}, nil
+}
+func (s *Server) runTranscription(id, name, job string, c TranscriptionConfig, consent bool, detail map[string]any) {
+	defer s.wg.Done()
+	defer func() { s.jobMu.Lock(); s.busy = false; s.jobMu.Unlock() }()
+	data, e := os.ReadFile(filepath.Join(s.Store.Originals, id))
+	var result TranscriptionResult
+	if e == nil {
+		kind := mime.TypeByExtension(strings.ToLower(filepath.Ext(name)))
+		if kind == "" {
+			kind = "application/octet-stream"
+		}
+		result, e = Transcribe(s.ctx, data, kind, c, s.Client, consent)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e == nil {
+		var fields map[string]any
+		if e = decodeObject(result, &fields); e == nil {
+			for k, v := range fields {
+				detail[k] = v
+			}
+			var raw []byte
+			raw, e = json.Marshal(detail)
+			if e == nil {
+				_, e = s.Store.DB.Exec("UPDATE processing SET state='transcribed',detail=? WHERE id=?", string(raw), job)
+			}
+		}
+		if e == nil {
+			var proposal Proposal
+			proposal, e = s.Store.Propose(id, result.Pages, nil)
+			if e == nil {
+				detail["run_id"] = proposal.RunID
+				raw, err := json.Marshal(detail)
+				e = err
+				if e == nil {
+					_, e = s.Store.DB.Exec("UPDATE processing SET state='review',detail=? WHERE id=?", string(raw), job)
+				}
+			}
+		}
+	}
+	if e != nil {
+		state := "error"
+		detail["error"] = "ValueError"
+		var up *UpstreamError
+		if errors.As(e, &up) {
+			detail["error"] = "HTTPError"
+			if up.Status != 0 {
+				detail["error"] = "HTTPStatusError"
+				detail["status_code"] = up.Status
+			}
+		}
+		if s.ctx.Err() != nil {
+			state = "interrupted"
+			delete(detail, "error")
+		}
+		raw, err := json.Marshal(detail)
+		if err == nil {
+			_, _ = s.Store.DB.Exec("UPDATE processing SET state=?,detail=? WHERE id=?", state, string(raw), job)
+		}
+	}
+}
+
+var _ = fmt.Sprint

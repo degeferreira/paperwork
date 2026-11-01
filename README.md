@@ -1,12 +1,14 @@
-<p align="center"><img src="assets/logo.svg" width="112" alt="Logo Paperwork: folha, traço de caneta e ponto de memória"></p>
-<h1 align="center">Paperwork</h1>
-<p align="center">O papel para pensar; o digital para lembrar.</p>
+<p align="center"><img src="assets/wordmark-pt-br.svg" width="560" alt="Paperwork — espaço para pensar, estrutura para lembrar"></p>
 
-Paperwork é uma extensão **analog-first para SilverBullet 2.11.1**. Você escreve em papel comum, fotografa ou digitaliza, escolhe a IA de transcrição, revisa e acrescenta o conteúdo às páginas que já usa. Funciona também com transcrição manual, sem IA.
+<p align="center"><strong>Português (Brasil)</strong> · <a href="README.en.md">English</a></p>
 
-**Seu diário é um só:** tanto a escrita digital quanto o manuscrito revisado usam `Daily/AAAA-MM-DD`. Não existe um segundo diário Paperwork. A incorporação acrescenta blocos com identificadores e origem, sem substituir seu texto. Na instalação com Relay, o botão do diário chama a função já existente; não acrescentamos outro comando de diário.
+Paperwork conecta anotações em papel ao seu espaço de conhecimento no **SilverBullet 2.11.1**. O fluxo preserva o original, organiza a transcrição para revisão e incorpora o conteúdo às notas existentes. Você pode usar transcrição manual ou configurar um provedor de IA.
 
-Esta versão é um **MVP experimental**. Há testes automatizados, inclusive captura em Chromium com câmera simulada e APIs simuladas. Não há garantia de reconhecimento perfeito de caligrafia nem validação gráfica em todas as plataformas.
+O projeto reúne diário, referências Zotero e documentos digitalizados em um fluxo acompanhado pelo usuário. A escrita digital e o conteúdo manuscrito revisado usam as mesmas páginas `Daily/AAAA-MM-DD`. IDs estáveis, revisão explícita e registro de origem ajudam a manter a continuidade das notas.
+
+A implementação usa **Go** no servidor, **TypeScript** como fonte da interface e Space Lua na integração nativa. O Paperwork pode funcionar de forma independente ou compartilhar conexões com o Relay.
+
+**Estágio atual:** MVP experimental. A validação automatizada usa documentos e serviços simulados; a qualidade de reconhecimento de manuscritos pessoais e o funcionamento em todas as plataformas ainda não estão comprovados. Toda incorporação requer revisão.
 
 ## Começar a usar
 
@@ -113,81 +115,38 @@ O serviço guarda originais imutáveis por SHA-256 em `$PAPERWORK_HOME/originals
 
 No pacote Docker independente, `$PAPERWORK_HOME` é `/paperwork`, montado de `runtime/paperwork`. No pacote combinado, conexões vêm do Relay, mas o serviço Paperwork permanece separado. As notas documentais ficam em `Paperwork/Documents/`; notas independentes em `Paperwork/Pages/`. Na revisão, **Abrir original preservado** abre o arquivo autenticado.
 
-**Paperwork: Criar backup** captura banco, originais e notas com manifesto e hashes. A CLI permite verificar/restaurar em destinos novos: `python -m paperwork.cli --help`. Backup não é sincronização concorrente: não coloque o SQLite ativo em uma pasta compartilhada entre máquinas.
+**Paperwork: Criar backup** captura banco, originais e notas com manifesto e hashes. O serviço é Go; banco e originais devem permanecer em volume persistente.
 
-## Instalação em outra máquina
+## Implementação e instalação
 
-A extensão tem duas partes: biblioteca **Space Lua/JavaScript no SilverBullet** e serviço auxiliar **Python**, para armazenamento, PDFs e jobs. Python é uma escolha deste projeto, não uma exigência do SilverBullet. Instalar apenas o Manifest da biblioteca não instala o serviço.
+Backend e ferramentas: **Go**. Interface: **TypeScript compilado** e Space Lua nativo. Não há código ou dependência Python no pacote. O JavaScript em `Library/Scripts` e `zotero` é gerado para execução no SilverBullet/Zotero e marcado como artefato no GitHub.
 
-Para uma instalação Docker **nova**:
+Daily e Zotero pertencem ao Paperwork: comandos **Daily: Abrir hoje**, **Vikunja: Sincronizar Daily atual**, **Zotero: Buscar biblioteca** e `/cite`. Conexões compartilhadas com Relay são opcionais. A configuração independente aceita `timezone`, SilverBullet URL/token, `vikunja` URL/token/Inbox e `zotero` user_id ou group_id/key_file. Ative os jobs explicitamente em `enabled.daily` e `enabled.zotero`; intervalos são `daily_interval` e `zotero_interval`, em segundos. Ambos começam desativados nos exemplos.
 
-```sh
-git clone https://github.com/degeferreira/paperwork.git
-cd paperwork
-python3 package.py /caminho/instalacao
-python3 bootstrap.py /caminho/instalacao
-cd /caminho/instalacao
-docker compose up -d --build
-```
-
-Configure a autenticação do SilverBullet e gere um token de acesso ao Space; guarde-o pelas configurações Paperwork. Não execute bootstrap sobre uma instalação existente: ele recusa reinicialização de runtime. O endereço do endpoint é visto do contêiner, portanto `127.0.0.1` não é outro computador nem outro contêiner.
-
-Para combinar com Relay, mantenha os checkouts irmãos `silverbullet-relay` e `paperwork`, e use o `package.py DESTINO --paperwork` do Relay. O pacote escolhe porta interna **8089** para Paperwork, mantendo **8088** para Relay. Não ative também `HUB_PAPERWORK`. Em uma instalação existente, faça backup e migre as montagens/bibliotecas; não substitua dados ou credenciais por exemplos.
-
-## Validação e limites
-
-Testes cobrem PFM, herança, citações tipadas, originais, deduplicação, escrita condicional, tarefas, políticas de envio, APIs simuladas, backup e índice Zotero. O teste de câmera usa Chromium e dispositivo sintético. O XPI tem testes de contrato dos hooks Zotero e da atribuição de aliases; **ainda não foi exercitado no Zotero desktop real**. IA não foi testada com manuscritos pessoais. Suporte a câmera física no seu aparelho depende da validação de permissões e compatibilidade.
-
-Permanecem fora desta versão: scanner multipágina interno, regiões gráficas, QR, miniaturas avançadas, resolução automática de `//continue`, atualização reconciliada de árvores já incorporadas e todas as plataformas do aplicativo original.
-
-```sh
-# Dependências Python: requirements.txt, em ambiente virtual
-PYTHONPATH=. python -m unittest discover -s tests -q
-npm run test:zotero
-npm run build:zotero
-# Com playwright-core e Chromium instalados:
-NODE_PATH=/caminho/node_modules node tests/browser-camera.cjs
-```
-
-[Fluxos adaptados ao SilverBullet](docs/SILVERBULLET-FLOWS.md) · [Arquitetura das APIs e fontes](docs/API-SOURCES.md) · [Repositório](https://github.com/degeferreira/paperwork)
-
-## Desenvolvimento TypeScript
-
-Os módulos de navegador têm fonte em `src/Library/Scripts/*.ts`, com verificação
-`strict`. O build mantém os caminhos `Library/Scripts/*.js` usados pelo Space Lua
- e pelo empacotador. Esses arquivos JavaScript gerados permanecem no repositório
-para instalação sem Node.js; edite a fonte TypeScript e reconstrua antes de empacotar.
-Space Lua permanece nas páginas da Library.
+Requer Go 1.26+ e Node.js para construir TypeScript (Node com execução nativa de TypeScript para os testes). No checkout:
 
 ```sh
 npm ci
-npm run check
 npm run build
+npm run test:zotero
+go test -p 1 ./...
+go build -o bin/paperwork ./cmd/paperwork
+go build -o bin/paperwork-state ./cmd/paperwork-state
+go build -o bin/sb-tools ./cmd/sb-tools
+bin/sb-tools package --kind paperwork --source . --binary bin/paperwork --destination /caminho/novo
+bin/sb-tools bootstrap --package /caminho/novo
 ```
 
-O compilador é fixado no `package-lock.json`. O build não instala bibliotecas nem
-altera serviços em execução. Os testes existentes consomem o JavaScript gerado.
+O pacote gerado contém Dockerfile, Compose, bibliotecas e binário Go. Configure acesso ao Space e os arquivos de credenciais antes de habilitar jobs. O servidor usa loopback `127.0.0.1:8089`; `PAPERWORK_HOME`, `PAPERWORK_CONFIG` e `PAPERWORK_LISTEN` permitem outros caminhos. Os tokens nunca são retornados ao navegador.
 
-O complemento Zotero tem fonte em `src/zotero/*.ts`; `host.d.ts` descreve a parte
-da API Zotero/Mozilla utilizada. `npm run build:zotero` compila primeiro e cria o
-XPI e seu SHA-256, com ordem e timestamps ZIP fixos. Repetir o comando com as
-mesmas fontes e o mesmo compilador gera os mesmos bytes. Não edite diretamente
-`zotero/aliases.js` ou `zotero/bootstrap.js`.
+Em instalação combinada, mantenha Relay e Paperwork em checkouts irmãos. O Relay encaminha rotas legadas Daily/Zotero ao Paperwork e não inicia seus jobs. O pacote compartilhado usa `PAPERWORK_RELAY_CONFIG` e `PAPERWORK_RELAY_SETTINGS` apenas para conexões. Não execute workers antigos e novos sobre o mesmo estado.
 
-O logo vetorial em [`assets/logo.svg`](assets/logo.svg) integra este projeto e
-segue a licença do repositório. Representa uma folha, escrita e um ponto de memória.
+### Migração de estado
 
-### Go migration development
+Faça uma captura SQLite consistente com os workers parados. `paperwork-state --source SNAPSHOT` mostra contagens sem conteúdo. Para transferir a uma biblioteca existente use `--destination BIBLIOTECA --workers-stopped`. IDs, hashes e valores são preservados em tabelas `relay_*`, separadas das tarefas manuscritas. A condição dos workers deve ser conferida pelo operador: a flag não consulta processos externos. Reversão exige reconciliar qualquer estado novo; não restaure snapshots antigos sobre bancos ativos.
 
-The Go backend is under validation and has not replaced the Python release.
-Build the standalone API with `go build -o paperwork-go ./cmd/paperwork`.
-For an isolated smoke test, use a new `PAPERWORK_HOME` and
-`PAPERWORK_LISTEN=127.0.0.1:18089`. The default listener is `127.0.0.1:8089`.
-Do not run it against the active library while another worker is using that state.
-The Go tests include fixtures from the existing Python PFM parser and temporary
-SQLite libraries; they do not read production documents or credentials.
-Daily/Zotero ownership transfer and release packaging are still pending.
+### Verificações
 
-### Estado da implementação Go/TypeScript
+Os testes Go incluem fixtures sintéticas do parser anterior, armazenamento, configuração independente/compartilhada, Daily idempotente, mapeamentos Zotero e retenção de checkpoint em conflito. `npm run test:camera` usa Chromium e câmera simulada; defina `CHROMIUM_PATH` se necessário. Qualidade de OCR de manuscritos pessoais depende do material/provedor e ainda não está comprovada.
 
-Fontes Go e TypeScript em desenvolvimento; a presença destes fontes não constitui uma release pronta para substituir o serviço Python. A transferência exclusiva de Daily/Zotero, os consumidores do estado migrado e a instalação limpa ainda precisam ser concluídos antes do corte de produção. Os bancos e credenciais de produção não fazem parte deste repositório.
+O pacote inclui uma cópia da biblioteca padrão nativa `Std`, alinhada à imagem SilverBullet 2.11.1. Ela fornece as APIs Space Lua usadas pelos comandos e widgets; instalar apenas o backend não registra a interface. Recarregue o cliente após atualizar as bibliotecas.

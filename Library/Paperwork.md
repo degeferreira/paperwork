@@ -15,13 +15,13 @@ function paperwork.home()
   return widget.htmlBlock(root)
 end
 function paperwork.call(path, method, body)
-  local port = tonumber(config.get("paperwork.port")) or 8088
+  local port = tonumber(config.get("paperwork.port")) or 8089
   local options = {method = method or "GET"}
   if body then options.body = body; options.headers = {["Content-Type"] = "application/json"} end
   local address = "http://127.0.0.1:" .. tostring(port) .. "/v1/paperwork/" .. path
-  local connection = type(hub) == "table" and hub.desktopConnection and hub.desktopConnection() or nil
+  local connection = clientStore.get("personal-hub.desktop.v1")
   if connection then
-    address = (connection.server or hub.tailnet) .. "/.proxy/127.0.0.1:" .. tostring(port) .. "/v1/paperwork/" .. path
+    address = (connection.server or config.get("relay.legacyServer") or "") .. "/.proxy/127.0.0.1:" .. tostring(port) .. "/v1/paperwork/" .. path
     options.headers = {Authorization = "Bearer " .. connection.token}
     if body then options.headers["X-Proxy-Header-Content-Type"] = "application/json" end
   end
@@ -85,7 +85,7 @@ end
 function paperwork.review(document, startPage)
   local root = dom.div {style = "padding:1em;background:Canvas;color:CanvasText;max-height:85vh;overflow:auto"}
   root.appendChild(dom.h2 {__rawText = document.name})
-  local sourceLink = dom.a {__rawText = "Abrir original preservado", href = "/.proxy/127.0.0.1:8088/v1/paperwork/documents/" .. document.id .. "/original", target = "_blank", rel = "noopener"}
+  local sourceLink = dom.a {__rawText = "Abrir original preservado", href = "/.proxy/127.0.0.1:8089/v1/paperwork/documents/" .. document.id .. "/original", target = "_blank", rel = "noopener"}
   root.appendChild(sourceLink)
   root.appendChild(dom.p {__rawText = "Cole a transcrição PFM. Separe páginas com uma linha contendo ---PAGE---. A proposta ainda não altera suas notas."})
   local text = dom.textarea {style = "width:100%;height:35vh"}
@@ -115,7 +115,7 @@ function paperwork.review(document, startPage)
   local duplicateAck
   local duplicatePanel
   local workbench = dom.div {style = "display:flex;flex-wrap:wrap;gap:1em"}
-  local original = "/.proxy/127.0.0.1:8088/v1/paperwork/documents/" .. document.id .. "/original"
+  local original = "/.proxy/127.0.0.1:8089/v1/paperwork/documents/" .. document.id .. "/original"
   local loaded, bytes = pcall(paperwork.call, "documents/" .. document.id .. "/original")
   if loaded then
     local helpers = js.importFromSpace("Library/Paperwork/Scripts/Documents.js")
@@ -364,16 +364,6 @@ function paperwork.tasks()
   editor.showPanel("modal", "5vh 3vw", root)
 end
 command.define {name = "Paperwork: Tarefas locais", run = paperwork.tasks}
-function paperwork.daily()
-  if type(hub) == "table" and hub.daily then hub.daily(); return end
-  local result = paperwork.call("daily/open", "POST")
-  if type(hub) == "table" and hub.navigate then hub.navigate(result.path); return end
-  for attempt = 1, 40 do
-    if space.pageExists(result.path) then editor.navigate(result.path); return end
-    js.new(js.window.Promise, function(resolve) js.window.setTimeout(resolve, 250) end)
-  end
-  error("Diário criado no servidor. Aguarde a sincronização antes de abri-lo; nenhuma nota local foi sobrescrita.")
-end
 function paperwork.search()
   local term = editor.prompt("Buscar nas transcrições:")
   if not term or term == "" then return end

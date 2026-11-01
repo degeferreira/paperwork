@@ -52,7 +52,7 @@ npm run build:zotero
 npm run test:zotero
 ```
 
-O XPI contém somente `manifest.json`, `bootstrap.js` e `aliases.js`. Não contém bancos, credenciais, serviço Python nem originais.
+O XPI contém somente `manifest.json`, `bootstrap.js` e `aliases.js`. Não contém bancos, credenciais, serviço auxiliar nem originais.
 
 A implementação usa os hooks documentados de [plugins Zotero 7](https://www.zotero.org/support/dev/zotero_7_for_developers), e as APIs de [itens](https://github.com/zotero/zotero/blob/main/chrome/content/zotero/xpcom/data/items.js) e [identidades URI](https://github.com/zotero/zotero/blob/main/chrome/content/zotero/xpcom/uri.js).
 
@@ -60,8 +60,4 @@ As fontes editáveis estão em `../src/zotero/`: regras puras em `aliases.ts`,
 ciclo de vida e menus em `bootstrap.ts`, contratos do host em `host.d.ts`.
 O build mantém `aliases.js` e `bootstrap.js` neste diretório, carregados como
 scripts clássicos pelo Zotero (sem módulos ES ou dependências de runtime).
-O construtor `../scripts/build-zotero.cjs` usa entradas em ordem fixa e data ZIP
-1980-01-01 para gerar o mesmo XPI byte a byte a partir das mesmas fontes.
-O arquivo `.sha256` acompanha o artefato; confira com `sha256sum -c` dentro de `dist`.
-O antigo `build.py` permanece disponível por compatibilidade, mas não é a rota
-reprodutível: execute `npm run build:zotero` para compilar as fontes antes de empacotar.
+O construtor Go `cmd/build-zotero` empacota os arquivos gerados de TypeScript em ZIP determinístico. Execute `npm run build:zotero`. Não há construtor Python ou JavaScript escrito à mão.

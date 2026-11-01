@@ -12,7 +12,9 @@
     "rootDir": "src",
     "outDir": ".",
     "skipLibCheck": false,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "types": [],
+    "moduleResolution": "Bundler"
   },
   "include": [
     "src/**/*.ts"
