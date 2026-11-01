@@ -1,0 +1,15 @@
+{
+  "name": "paperwork",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "build:zotero": "npm run build && node scripts/build-zotero.cjs",
+    "test:zotero": "npm run build && node tests/zotero-addon.cjs",
+    "test:camera": "npm run build && node tests/browser-camera.cjs"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

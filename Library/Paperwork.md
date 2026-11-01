@@ -38,6 +38,8 @@ function paperwork.inbox()
   local root = dom.div {style = "padding:1em;background:Canvas;color:CanvasText;max-height:85vh;overflow:auto"}
   root.appendChild(dom.h2 {__rawText = "Paperwork — Inbox de documentos"})
   local status = dom.p {role = "status"}
+  root.appendChild(dom.p {__rawText = "Seu diário digital e o caderno usam as mesmas páginas Daily/AAAA-MM-DD. Importe um PDF multipágina ou fotografe uma página."})
+  root.appendChild(dom.button {__rawText = "Abrir câmera / fotografar página", onclick = paperwork.camera})
   local file = dom.input {type = "file", accept = ".pdf,.png,.jpg,.jpeg,.webp"}
   root.appendChild(file)
   root.appendChild(dom.button {__rawText = "Importar original", onclick = function()
@@ -60,6 +62,26 @@ function paperwork.inbox()
   root.appendChild(dom.button {__rawText = "Fechar", onclick = function() editor.hidePanel("modal") end})
   editor.showPanel("modal", "5vh 3vw", root)
 end
+function paperwork.camera()
+  local root = dom.div {style = "padding:1em;background:Canvas;color:CanvasText;max-height:85vh;overflow:auto"}
+  root.appendChild(dom.h2 {__rawText = "Fotografar página"})
+  root.appendChild(dom.p {__rawText = "Abra a câmera, confira a foto e importe. Você pode repetir para mais páginas; cada foto conserva seu original. Para um lote com contexto entre páginas, importe um PDF multipágina."})
+  local helpers = js.importFromSpace("Library/Paperwork/Scripts/Documents.js")
+  local status = dom.p {role = "status"}
+  local capture = helpers.cameraPanel()
+  root.appendChild(capture.root)
+  root.appendChild(dom.button {__rawText = "Importar foto", onclick = function()
+    local ok, photo = pcall(capture.photo)
+    if not ok then status.textContent = tostring(photo); return end
+    local imported, result = pcall(paperwork.call, "documents", "POST", {name = photo.name, data = photo.data})
+    if not imported then status.textContent = tostring(result); return end
+    capture.close(); paperwork.review({id = result.id, name = result.name})
+  end})
+  root.appendChild(status)
+  root.appendChild(dom.button {__rawText = "Fechar câmera", onclick = function() capture.close(); paperwork.inbox() end})
+  editor.showPanel("modal", "5vh 3vw", root)
+end
+
 function paperwork.review(document, startPage)
   local root = dom.div {style = "padding:1em;background:Canvas;color:CanvasText;max-height:85vh;overflow:auto"}
   root.appendChild(dom.h2 {__rawText = document.name})
@@ -222,11 +244,28 @@ function paperwork.settings()
   root.appendChild(dom.h2 {__rawText = "Paperwork — Configurações"})
   if values.shared_connections then root.appendChild(dom.p {__rawText = "Conexões e fuso compartilhados: altere-os em Relay: Configurações."}) end
   local fields = {}
+  local provider = dom.select {["aria-label"] = "Provedor de transcrição", style = "display:block;width:95%"}
+  for _, entry in ipairs({{"manual", "Sem IA — transcrição manual"}, {"gemini", "Google Gemini"}, {"claude", "Anthropic Claude"},
+    {"openai", "ChatGPT / OpenAI (API)"}, {"openai-compatible", "Outro provedor compatível com OpenAI"}, {"local-compatible", "Modelo local / Ollama compatível"}}) do
+    provider.appendChild(dom.option {value = entry[1], __rawText = entry[2]})
+  end
+  provider.value = values.provider or "manual"
+  root.appendChild(dom.p {__rawText = "Escolha a IA"}); root.appendChild(provider); fields.provider = provider
+  root.appendChild(dom.p {__rawText = "As opções usam APIs e suas próprias chaves. Informe um modelo que aceite imagem/PDF. A seleção não envia nenhum documento."})
   for _, spec in ipairs({{"timezone", "Fuso horário"}, {"silverbullet_url", "Servidor SilverBullet"}, {"vikunja_url", "API Vikunja"},
-    {"provider", "Transcrição: manual, gemini ou local-compatible"}, {"model", "Modelo"}, {"local_url", "Endpoint local compatível"}}) do
+    {"model", "Identificador do modelo"}, {"local_url", "Endpoint /v1 (somente modelos locais e outros compatíveis)"}}) do
     local field = dom.input {value = tostring(values[spec[1]] or ""), disabled = values.shared_connections and (spec[1] == "silverbullet_url" or spec[1] == "vikunja_url" or spec[1] == "timezone"), style = "display:block;width:95%"}
     root.appendChild(dom.p {__rawText = spec[2]}); root.appendChild(field); fields[spec[1]] = field
   end
+  local profiles = values.profiles or {}
+  local previousProvider = provider.value
+  provider.addEventListener("change", function()
+    profiles[previousProvider] = {model = tostring(fields.model.value or ""), url = tostring(fields.local_url.value or "")}
+    previousProvider = tostring(provider.value)
+    local profile = profiles[previousProvider] or {}
+    fields.model.value = profile.model or ""
+    fields.local_url.value = profile.url or "http://127.0.0.1:11434/v1"
+  end)
   local external = dom.input {type = "checkbox", checked = values.external_allowed}
   local label = dom.label {__rawText = "Permitir provedores externos (cada envio também exige confirmação)"}
   label.appendChild(external); root.appendChild(label)
@@ -237,7 +276,7 @@ function paperwork.settings()
     local ok, result = pcall(paperwork.call, "settings", "PUT", body)
     status.textContent = ok and "Configurações salvas." or tostring(result)
   end})
-  for _, name in ipairs({"silverbullet_token", "vikunja_token", "zotero_key", "gemini_key", "local_key"}) do
+  for _, name in ipairs({"silverbullet_token", "vikunja_token", "zotero_key", "gemini_key", "claude_key", "openai_key", "compatible_key", "local_key"}) do
     local key = name
     if not values.shared_connections or (key ~= "silverbullet_token" and key ~= "vikunja_token" and key ~= "zotero_key") then
     local field = dom.input {type = "password", autocomplete = "off", placeholder = key}
@@ -249,6 +288,23 @@ function paperwork.settings()
     end})
     end
   end
+  root.appendChild(status)
+  root.appendChild(dom.button {__rawText = "Fechar", onclick = function() editor.hidePanel("modal") end})
+  editor.showPanel("modal", "5vh 3vw", root)
+end
+function paperwork.importZoteroIndex()
+  local root = dom.div {style = "padding:1em;background:Canvas;color:CanvasText"}
+  root.appendChild(dom.h2 {__rawText = "Importar identificadores do Zotero"})
+  root.appendChild(dom.p {__rawText = "No Zotero, selecione até 200 itens e use Paperwork: copiar índice selecionado. Cole o JSON aqui. O índice contém aliases e identidades, sem chaves de API. Conflitos bloqueiam todo o lote."})
+  local text = dom.textarea {style = "width:95%;height:40vh", ["aria-label"] = "Índice JSON do Zotero"}
+  root.appendChild(text)
+  local status = dom.p {role = "status"}
+  root.appendChild(dom.button {__rawText = "Importar identificadores", onclick = function()
+    local parsed, body = pcall(js.window.JSON.parse, tostring(text.value or ""))
+    if not parsed then status.textContent = "JSON inválido."; return end
+    local ok, result = pcall(paperwork.call, "references/index", "POST", js.tolua(body))
+    status.textContent = ok and "Identificadores importados. Use Ƶ alias no papel e Abra Literature Note para associar a página bibliográfica." or tostring(result)
+  end})
   root.appendChild(status)
   root.appendChild(dom.button {__rawText = "Fechar", onclick = function() editor.hidePanel("modal") end})
   editor.showPanel("modal", "5vh 3vw", root)
@@ -309,6 +365,7 @@ function paperwork.tasks()
 end
 command.define {name = "Paperwork: Tarefas locais", run = paperwork.tasks}
 function paperwork.daily()
+  if type(hub) == "table" and hub.daily then hub.daily(); return end
   local result = paperwork.call("daily/open", "POST")
   if type(hub) == "table" and hub.navigate then hub.navigate(result.path); return end
   for attempt = 1, 40 do
@@ -332,7 +389,6 @@ function paperwork.search()
   local selected = editor.filterBox("Paperwork — resultados", options)
   if selected then paperwork.review(selected.value) end
 end
-command.define {name = "Paperwork: Abrir diário de hoje", run = paperwork.daily}
 command.define {name = "Paperwork: Buscar documentos", run = paperwork.search}
 function paperwork.backup()
   local name = editor.prompt("Nome do snapshot (letras, números e hífen):")
@@ -342,6 +398,7 @@ function paperwork.backup()
   editor.flashNotification(ok and "Backup concluído e verificado no destino do servidor." or tostring(result), ok and "info" or "error")
 end
 command.define {name = "Paperwork: Criar backup", run = paperwork.backup}
+command.define {name = "Paperwork: Importar identificadores do Zotero", run = paperwork.importZoteroIndex}
 command.define {name = "Paperwork: Registrar referência", run = paperwork.registerReference}
 command.define {name = "Paperwork: Abrir Literature Note", run = paperwork.importReference}
 command.define {name = "Paperwork: Configurações", run = paperwork.settings}

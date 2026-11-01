@@ -192,7 +192,7 @@ async def queue_transcription(identity:str,body:OCRRequest,request:Request):
         configured=configuration().get('transcription',{})
         if configured.get('provider') not in ('gemini','local-compatible'):
             raise HTTPException(503,'Configure a transcription provider first; manual transcription remains available')
-        external=configured['provider']=='gemini' or urlsplit(configured.get('url','')).hostname not in ('localhost','127.0.0.1','::1')
+        external=configured['provider'] in ('gemini','claude','openai') or urlsplit(configured.get('url','')).hostname not in ('localhost','127.0.0.1','::1')
         policy=library.db.execute('SELECT local_only FROM document_metadata WHERE document_id=?',(identity,)).fetchone()
         if external and (not policy or policy[0] or not body.consent_external or not configured.get('external_allowed')):
             raise HTTPException(409,'Document is local-only or external transmission was not authorized')
@@ -263,6 +263,29 @@ def reference_alias(body:ReferenceAlias):
     try:return register(library.db,**body.model_dump())
     except ValueError as error:raise HTTPException(409,str(error)) from None
     finally:library.db.close()
+
+class ReferenceIndex(BaseModel):
+    format:str
+    references:list[ReferenceAlias]=Field(min_length=1,max_length=200)
+
+@router.post('/references/index')
+def import_reference_index(body:ReferenceIndex):
+    if body.format!='paperwork-zotero-aliases-v1':raise HTTPException(422,'Unknown alias index format')
+    import sqlite3
+    from .references import register,setup
+    library=store();check=sqlite3.connect(':memory:')
+    try:
+        setup(library.db);setup(check)
+        # Validate the whole batch against current and other incoming identities before writing.
+        check.executemany('INSERT INTO reference_aliases VALUES (?,?,?,?,?,?)',library.db.execute('SELECT * FROM reference_aliases'))
+        for entry in body.references:register(check,**entry.model_dump())
+        with library.db:
+            for entry in body.references:
+                library.db.execute('INSERT OR IGNORE INTO reference_aliases(alias,library_type,library_id,item_key,note_path) VALUES (?,?,?,?,?)',
+                    (entry.alias,entry.library_type,entry.library_id,entry.item_key,entry.note_path))
+        return {'imported':len(body.references)}
+    except ValueError as error:raise HTTPException(409,str(error)) from None
+    finally:check.close();library.db.close()
 
 @router.get('/documents/{identity}/references')
 def document_references(identity:str):

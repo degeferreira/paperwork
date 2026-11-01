@@ -1,0 +1,417 @@
+[
+  {
+    "name": "cross-page",
+    "pages": [
+      "// 2026-10-29\n• A",
+      "> □ B\n//end\n// 2026-10-30\n• C",
+      "// 2026-10-31\n• D\n//end"
+    ],
+    "context": null,
+    "expected": {
+      "blocks": [
+        {
+          "id": "e338d267-0f64-5141-a219-bcba000fc848",
+          "page": 1,
+          "line": 2,
+          "context": "Daily/2026-10-29",
+          "text": "A",
+          "kind": "bullet",
+          "parent_id": null,
+          "tags": [],
+          "projects": [],
+          "references": [],
+          "continuation": null,
+          "people": []
+        },
+        {
+          "id": "09032a30-f20f-59d1-a009-6548db2b59eb",
+          "page": 2,
+          "line": 1,
+          "context": "Daily/2026-10-29",
+          "text": "B",
+          "kind": "task",
+          "parent_id": "e338d267-0f64-5141-a219-bcba000fc848",
+          "tags": [],
+          "projects": [],
+          "references": [],
+          "continuation": null,
+          "people": []
+        },
+        {
+          "id": "689b58b4-19d9-5194-b1b2-eab7b212fa7e",
+          "page": 2,
+          "line": 4,
+          "context": "Daily/2026-10-30",
+          "text": "C",
+          "kind": "bullet",
+          "parent_id": null,
+          "tags": [],
+          "projects": [],
+          "references": [],
+          "continuation": null,
+          "people": []
+        },
+        {
+          "id": "90386e35-bb1e-5e8e-a1ec-6a5f531e912b",
+          "page": 3,
+          "line": 2,
+          "context": "Daily/2026-10-31",
+          "text": "D",
+          "kind": "bullet",
+          "parent_id": null,
+          "tags": [],
+          "projects": [],
+          "references": [],
+          "continuation": null,
+          "people": []
+        }
+      ],
+      "review": []
+    }
+  },
+  {
+    "name": "inheritance",
+    "pages": [
+      "// 2026-10-31\n• Leitura Ƶ Silva24-Mem p.12 @tese #memoria\n   • Argumento\n> ! Interpretação\n>> ? Evidência\n• Planejamento\n> □ Aula\n>> □ Slides"
+    ],
+    "context": null,
+    "expected": {
+      "blocks": [
+        {
+          "id": "e338d267-0f64-5141-a219-bcba000fc848",
+          "page": 1,
+          "line": 2,
+          "context": "Daily/2026-10-31",
+          "text": "Leitura Ƶ Silva24-Mem p.12 @tese #memoria",
+          "kind": "bullet",
+          "parent_id": null,
+          "tags": [
+            "memoria"
+          ],
+          "projects": [
+            "tese"
+          ],
+          "references": [
+            {
+              "alias": "Silva24-Mem",
+              "page": 12
+            }
+          ],
+          "continuation": null,
+          "people": []
+        },
+        {
+          "id": "ef13865c-8186-5783-8050-c06677275909",
+          "page": 1,
+          "line": 3,
+          "context": "Daily/2026-10-31",
+          "text": "Argumento",
+          "kind": "bullet",
+          "parent_id": "e338d267-0f64-5141-a219-bcba000fc848",
+          "tags": [
+            "memoria"
+          ],
+          "projects": [
+            "tese"
+          ],
+          "references": [
+            {
+              "alias": "Silva24-Mem",
+              "page": 12
+            }
+          ],
+          "continuation": null,
+          "people": []
+        },
+        {
+          "id": "89c758a0-3980-5569-8d43-20cc94565ac3",
+          "page": 1,
+          "line": 4,
+          "context": "Daily/2026-10-31",
+          "text": "Interpretação",
+          "kind": "idea",
+          "parent_id": "e338d267-0f64-5141-a219-bcba000fc848",
+          "tags": [
+            "memoria"
+          ],
+          "projects": [
+            "tese"
+          ],
+          "references": [
+            {
+              "alias": "Silva24-Mem",
+              "page": 12
+            }
+          ],
+          "continuation": null,
+          "people": []
+        },
+        {
+          "id": "224ed5d8-f996-5f65-a6fb-992132744810",
+          "page": 1,
+          "line": 5,
+          "context": "Daily/2026-10-31",
+          "text": "Evidência",
+          "kind": "question",
+          "parent_id": "89c758a0-3980-5569-8d43-20cc94565ac3",
+          "tags": [
+            "memoria"
+          ],
+          "projects": [
+            "tese"
+          ],
+          "references": [
+            {
+              "alias": "Silva24-Mem",
+              "page": 12
+            }
+          ],
+          "continuation": null,
+          "people": []
+        },
+        {
+          "id": "bf49b43d-de2b-52e7-9474-47780918113e",
+          "page": 1,
+          "line": 6,
+          "context": "Daily/2026-10-31",
+          "text": "Planejamento",
+          "kind": "bullet",
+          "parent_id": null,
+          "tags": [],
+          "projects": [],
+          "references": [],
+          "continuation": null,
+          "people": []
+        },
+        {
+          "id": "4379228f-2212-58f4-8ae4-3b7b3e5b9cd0",
+          "page": 1,
+          "line": 7,
+          "context": "Daily/2026-10-31",
+          "text": "Aula",
+          "kind": "task",
+          "parent_id": "bf49b43d-de2b-52e7-9474-47780918113e",
+          "tags": [],
+          "projects": [],
+          "references": [],
+          "continuation": null,
+          "people": []
+        },
+        {
+          "id": "9130b62e-41ec-5ad6-a7e5-dcd33913b415",
+          "page": 1,
+          "line": 8,
+          "context": "Daily/2026-10-31",
+          "text": "Slides",
+          "kind": "task",
+          "parent_id": "4379228f-2212-58f4-8ae4-3b7b3e5b9cd0",
+          "tags": [],
+          "projects": [],
+          "references": [],
+          "continuation": null,
+          "people": []
+        }
+      ],
+      "review": []
+    }
+  },
+  {
+    "name": "invalid-date",
+    "pages": [
+      "• Sem data\n// 2026-02-30\n• Inválido\n//end\n• Pendente"
+    ],
+    "context": null,
+    "expected": {
+      "blocks": [
+        {
+          "id": "9ddbe835-2a0f-53de-9ecf-6f2e33808d45",
+          "page": 1,
+          "line": 1,
+          "context": null,
+          "text": "Sem data",
+          "kind": "bullet",
+          "parent_id": null,
+          "tags": [],
+          "projects": [],
+          "references": [],
+          "continuation": null,
+          "people": []
+        },
+        {
+          "id": "ef13865c-8186-5783-8050-c06677275909",
+          "page": 1,
+          "line": 3,
+          "context": null,
+          "text": "Inválido",
+          "kind": "bullet",
+          "parent_id": null,
+          "tags": [],
+          "projects": [],
+          "references": [],
+          "continuation": null,
+          "people": []
+        },
+        {
+          "id": "224ed5d8-f996-5f65-a6fb-992132744810",
+          "page": 1,
+          "line": 5,
+          "context": null,
+          "text": "Pendente",
+          "kind": "bullet",
+          "parent_id": null,
+          "tags": [],
+          "projects": [],
+          "references": [],
+          "continuation": null,
+          "people": []
+        }
+      ],
+      "review": [
+        {
+          "page": 1,
+          "line": 1,
+          "reason": "missing-date-or-page",
+          "raw": "• Sem data"
+        },
+        {
+          "page": 1,
+          "line": 2,
+          "reason": "invalid-date",
+          "raw": "// 2026-02-30"
+        },
+        {
+          "page": 1,
+          "line": 3,
+          "reason": "missing-date-or-page",
+          "raw": "• Inválido"
+        },
+        {
+          "page": 1,
+          "line": 5,
+          "reason": "missing-date-or-page",
+          "raw": "• Pendente"
+        }
+      ]
+    }
+  },
+  {
+    "name": "literal",
+    "pages": [
+      "// 2026-10-31\n>> □ Órfão\n• Pai\n\\> literal\n>0 matemática"
+    ],
+    "context": null,
+    "expected": {
+      "blocks": [
+        {
+          "id": "e338d267-0f64-5141-a219-bcba000fc848",
+          "page": 1,
+          "line": 2,
+          "context": "Daily/2026-10-31",
+          "text": "Órfão",
+          "kind": "task",
+          "parent_id": null,
+          "tags": [],
+          "projects": [],
+          "references": [],
+          "continuation": null,
+          "people": []
+        },
+        {
+          "id": "ef13865c-8186-5783-8050-c06677275909",
+          "page": 1,
+          "line": 3,
+          "context": "Daily/2026-10-31",
+          "text": "Pai\n> literal\n>0 matemática",
+          "kind": "bullet",
+          "parent_id": null,
+          "tags": [],
+          "projects": [],
+          "references": [],
+          "continuation": null,
+          "people": []
+        }
+      ],
+      "review": [
+        {
+          "page": 1,
+          "line": 2,
+          "reason": "missing-parent",
+          "raw": ">> □ Órfão"
+        }
+      ]
+    }
+  },
+  {
+    "name": "continue",
+    "pages": [
+      ":: Ensaio\n• Ideia\n::end\n// 2026-10-31\n//continue B01842\n• Segue"
+    ],
+    "context": null,
+    "expected": {
+      "blocks": [
+        {
+          "id": "e338d267-0f64-5141-a219-bcba000fc848",
+          "page": 1,
+          "line": 2,
+          "context": "Page/Ensaio",
+          "text": "Ideia",
+          "kind": "bullet",
+          "parent_id": null,
+          "tags": [],
+          "projects": [],
+          "references": [],
+          "continuation": null,
+          "people": []
+        },
+        {
+          "id": "bf49b43d-de2b-52e7-9474-47780918113e",
+          "page": 1,
+          "line": 6,
+          "context": "Daily/2026-10-31",
+          "text": "Segue",
+          "kind": "bullet",
+          "parent_id": null,
+          "tags": [],
+          "projects": [],
+          "references": [],
+          "continuation": "B01842",
+          "people": []
+        }
+      ],
+      "review": [
+        {
+          "page": 1,
+          "line": 5,
+          "reason": "resolve-continuation",
+          "target": "B01842"
+        }
+      ]
+    }
+  },
+  {
+    "name": "free-paper",
+    "pages": [
+      "Texto livre sem marcações.\nContinuação."
+    ],
+    "context": "Daily/2026-10-31",
+    "expected": {
+      "blocks": [
+        {
+          "id": "9ddbe835-2a0f-53de-9ecf-6f2e33808d45",
+          "page": 1,
+          "line": 1,
+          "context": "Daily/2026-10-31",
+          "text": "Texto livre sem marcações.\nContinuação.",
+          "kind": "paragraph",
+          "parent_id": null,
+          "tags": [],
+          "projects": [],
+          "references": [],
+          "continuation": null,
+          "people": []
+        }
+      ],
+      "review": []
+    }
+  }
+]

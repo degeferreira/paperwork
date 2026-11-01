@@ -60,11 +60,13 @@ def get_settings(request:Request):
                     vikunja_url=config.get('vikunja',{}).get('url','http://127.0.0.1:3456/api/v1'),
                     provider=ocr.get('provider','manual'),model=ocr.get('model',''),local_url=ocr.get('url','http://127.0.0.1:11434/v1'),
                     external_allowed=ocr.get('external_allowed',False)).model_dump()
-    return {**result,'shared_connections':bool(service) or config.get('__shared',False)}
+    profiles={k:{'model':v.get('model',''),'url':v.get('url','http://127.0.0.1:11434/v1')} for k,v in config.get('transcription_profiles',{}).items()}
+    profiles[ocr.get('provider','manual')]={'model':ocr.get('model',''),'url':ocr.get('url','http://127.0.0.1:11434/v1')}
+    return {**result,'profiles':profiles,'shared_connections':bool(service) or config.get('__shared',False)}
 
 @router.put('')
 def put_settings(body:Settings,request:Request):
-    if body.provider not in ('manual','gemini','local-compatible'):raise HTTPException(422,'Unsupported provider')
+    if body.provider not in ('manual','gemini','claude','openai','openai-compatible','local-compatible'):raise HTTPException(422,'Unsupported provider')
     try:
         sb,vk,local=map(url,(body.silverbullet_url,body.vikunja_url,body.local_url))
     except ValueError:raise HTTPException(422,'Invalid server URL') from None
@@ -81,15 +83,19 @@ def put_settings(body:Settings,request:Request):
     secret_dir=config_path().parent/'secrets'
     config.setdefault('silverbullet_token_file',str(secret_dir/'silverbullet_token'))
     config['vikunja']={'url':vk,'token_file':str(secret_dir/'vikunja_token')}
+    previous=config.get('transcription',{})
+    profiles=config.setdefault('transcription_profiles',{})
+    if previous.get('provider'):profiles[previous['provider']]=previous
+    profiles[body.provider]={'model':body.model,'url':local}
     config['transcription']={'provider':body.provider,'model':body.model,'url':local,'external_allowed':body.external_allowed,
-                             'key_file':str(secret_dir/('gemini_key' if body.provider=='gemini' else 'local_key'))}
+                             'key_file':str(secret_dir/({'gemini':'gemini_key','claude':'claude_key','openai':'openai_key','openai-compatible':'compatible_key'}.get(body.provider,'local_key')))}
     private_write(config_path(),json.dumps(config,indent=2)+'\n')
     return {'saved':True}
 
 class Credential(BaseModel):value:str=Field(min_length=1,max_length=4096)
 @router.put('/secrets/{name}')
 def credential(name:str,body:Credential,request:Request):
-    if name not in ('silverbullet_token','vikunja_token','zotero_key','gemini_key','local_key'):raise HTTPException(404)
+    if name not in ('silverbullet_token','vikunja_token','zotero_key','gemini_key','claude_key','openai_key','compatible_key','local_key'):raise HTTPException(404)
     if (getattr(request.app.state,'service',None) or configuration().get('__shared')) and name in ('silverbullet_token','vikunja_token','zotero_key'):
         raise HTTPException(409,'Configure shared credentials in Relay settings')
     value=body.value.strip()

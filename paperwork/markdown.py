@@ -32,6 +32,8 @@ def render(proposal,identity,aliases=None,task_ids=None):
             note=(aliases or {}).get(mention['alias'])
             if note:
                 text=re.sub(r'Ƶ\s+'+re.escape(mention['alias'])+r'(?![\w-])',lambda _: '[['+note+'|Ƶ '+mention['alias']+']]',text)
+        # Typed native links share backlinks with digital notes. Preserve @project semantics.
+        text=re.sub(r'(?<!\S)(@@|@)([\w-]+)',lambda m: '[['+('People/' if m[1]=='@@' else 'Projects/')+m[2]+'|'+m[0]+']]',text)
         if task_ids and block['id'] in task_ids:
             text+=' · `'+task_ids[block['id']]+'`'
         marker=f'<!-- paperwork-block:{block["id"]} -->'

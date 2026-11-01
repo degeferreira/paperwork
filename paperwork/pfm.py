@@ -23,6 +23,7 @@ class Block:
     projects: list = field(default_factory=list)
     references: list = field(default_factory=list)
     continuation: str | None = None
+    people: list = field(default_factory=list)
 
 
 def parse(pages, artifact_id, initial_context=None):
@@ -111,12 +112,14 @@ def parse(pages, artifact_id, initial_context=None):
             parent=stack[depth-1][1] if depth and not ambiguous and depth<=len(stack) else None
             symbol, content=(bullet[1],bullet[2]) if bullet else ('paragraph' if paragraph else '•',body)
             tags=re.findall(r'(?:^|\s)#([\w-]+)',content)
-            projects=re.findall(r'(?:^|\s)@([\w-]+)',content)
+            projects=re.findall(r'(?<!\S)@([\w-]+)',content)
+            people=re.findall(r'(?<!\S)@@([\w-]+)',content)
             refs=[dict(alias=m[1],page=int(m[2]) if m[2] else None) for m in CITE.finditer(content)]
             block=Block(str(uuid.uuid5(NS,f'{artifact_id}:{page}:{line}')),page,line,context,content,
                         {'□':'task','×':'task-update','!':'idea','?':'question','paragraph':'paragraph'}.get(symbol,'bullet'),
                         parent.id if parent else None,tags or (parent.tags[:] if parent else []),
-                        projects or (parent.projects[:] if parent else []),refs or (parent.references[:] if parent else []),continuation)
+                        projects or (parent.projects[:] if parent else []),refs or (parent.references[:] if parent else []),continuation,
+                        people or (parent.people[:] if parent else []))
             blocks.append(block)
             if ambiguous:
                 stack=[]
