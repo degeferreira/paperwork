@@ -12,7 +12,7 @@ The implementation uses **Go** on the server, **TypeScript** as the interface so
 ## Working with Paperwork
 
 1. Open **Paperwork: Configurações** to select manual transcription or configure an AI provider.
-2. Open **Paperwork: Inbox** to import a multipage PDF, PNG, JPEG, or WebP, or capture a page with the camera.
+2. Open **Paperwork: Inbox** to import a multipage PDF, PNG, JPEG, or WebP, or choose **Fotografar página** to capture a page with the camera. The photo preview enables **Usar esta foto**, which opens the review step.
 3. Transcribe the document and review the text, destination date or page, structure, and unresolved entries.
 4. Confirm the review and incorporate the approved content into your notes.
 

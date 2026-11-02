@@ -12,6 +12,7 @@ function paperwork.home()
     local action = item[2]
     root.appendChild(dom.button {__rawText = item[1], onclick = action})
   end
+  js.importFromSpace("Library/Paperwork/Scripts/Documents.js").stylePanel(root)
   return widget.htmlBlock(root)
 end
 function paperwork.call(path, method, body)
@@ -35,56 +36,99 @@ function paperwork.call(path, method, body)
 end
 
 function paperwork.inbox()
-  local root = dom.div {style = "padding:1em;background:Canvas;color:CanvasText;max-height:85vh;overflow:auto"}
-  root.appendChild(dom.h2 {__rawText = "Paperwork — Inbox de documentos"})
-  local status = dom.p {role = "status"}
-  root.appendChild(dom.p {__rawText = "Seu diário digital e o caderno usam as mesmas páginas Daily/AAAA-MM-DD. Importe um PDF multipágina ou fotografe uma página."})
-  root.appendChild(dom.button {__rawText = "Abrir câmera / fotografar página", onclick = paperwork.camera})
-  local file = dom.input {type = "file", accept = ".pdf,.png,.jpg,.jpeg,.webp"}
-  root.appendChild(file)
-  root.appendChild(dom.button {__rawText = "Importar original", onclick = function()
-    local selected = file.files[0]
-    if not selected then status.textContent = "Selecione PDF ou imagem."; return end
-    local helpers = js.importFromSpace("Library/Paperwork/Scripts/Documents.js")
+  local root = dom.div {}
+  local helpers = js.importFromSpace("Library/Paperwork/Scripts/Documents.js")
+  local header = helpers.panelHeader(root, "Adicionar um documento", "Fotografe uma página ou envie um arquivo para começar.", 1)
+  local close = helpers.actionButton("Fechar", "close", "quiet")
+  close.addEventListener("click", function() editor.hidePanel("modal") end)
+  header.appendChild(close)
+  local status = dom.p {role = "status", ["aria-live"] = "polite"}
+  local actions = helpers.actionGroup()
+  local camera = helpers.actionButton("Fotografar página", "camera", "primary", "Use a câmera do celular ou computador")
+  camera.addEventListener("click", paperwork.camera)
+  actions.appendChild(camera)
+  local picker = helpers.uploadPicker()
+  actions.appendChild(picker.root); root.appendChild(actions)
+  local busy = false
+  picker.input.addEventListener("change", function()
+    local selected = picker.input.files[0]
+    if not selected or busy then return end
+    if selected.size > 18000000 then status.textContent = "O arquivo excede 18 MB. Escolha um arquivo menor."; picker.input.value = ""; return end
+    busy = true; helpers.buttonBusy(picker.button, true); helpers.buttonBusy(camera, true)
+    status.textContent = "Importando " .. selected.name .. "…"
     local loaded, encoded = pcall(helpers.readDocument, selected)
-    if not loaded then status.textContent = tostring(encoded); return end
-    local ok, result = pcall(paperwork.call, "documents", "POST", {name = selected.name, data = encoded})
-    status.textContent = ok and "Original preservado. Reabra a Inbox para revisar." or tostring(result)
-  end})
+    if not root.isConnected then return end
+    if not loaded then
+      status.textContent = tostring(encoded)
+    else
+      local ok, result = pcall(paperwork.call, "documents", "POST", {name = selected.name, data = encoded})
+      if not root.isConnected then return end
+      if ok then
+        busy = false; paperwork.review({id = result.id, name = selected.name}); return
+      end
+      status.textContent = tostring(result)
+    end
+    busy = false; helpers.buttonBusy(picker.button, false); helpers.buttonBusy(camera, false); picker.input.value = ""
+  end)
+  root.appendChild(dom.p {class = "pw-hint", __rawText = "O original fica preservado. Você revisa o conteúdo antes de salvar nas notas."})
+  root.appendChild(status)
+  root.appendChild(dom.h3 {__rawText = "Documentos para revisar"})
   local ok, docs = pcall(paperwork.call, "documents")
   if ok then
+    if #docs == 0 then root.appendChild(dom.div {class = "pw-empty", __rawText = "Sua caixa de entrada está vazia. Adicione seu primeiro documento acima."}) end
     for _, row in ipairs(docs) do
       local document = row
-      root.appendChild(dom.button {__rawText = document.name, onclick = function() paperwork.review(document) end})
+      local button = helpers.actionButton(document.name, "document", "", "Abrir documento e revisão")
+      button.classList.add("pw-document")
+      button.addEventListener("click", function() paperwork.review(document) end)
+      root.appendChild(button)
     end
-  else status.textContent = tostring(docs) end
-  root.appendChild(status)
-  root.appendChild(dom.button {__rawText = "Fechar", onclick = function() editor.hidePanel("modal") end})
+  else status.textContent = "Não foi possível carregar os documentos. " .. tostring(docs) end
+  js.importFromSpace("Library/Paperwork/Scripts/Documents.js").stylePanel(root)
   editor.showPanel("modal", "5vh 3vw", root)
 end
 function paperwork.camera()
-  local root = dom.div {style = "padding:1em;background:Canvas;color:CanvasText;max-height:85vh;overflow:auto"}
-  root.appendChild(dom.h2 {__rawText = "Fotografar página"})
-  root.appendChild(dom.p {__rawText = "Abra a câmera, confira a foto e importe. Você pode repetir para mais páginas; cada foto conserva seu original. Para um lote com contexto entre páginas, importe um PDF multipágina."})
+  local root = dom.div {}
   local helpers = js.importFromSpace("Library/Paperwork/Scripts/Documents.js")
-  local status = dom.p {role = "status"}
+  local header = helpers.panelHeader(root, "Fotografar uma página", "Ative a câmera, enquadre o papel e confira a foto antes de continuar.", 1)
   local capture = helpers.cameraPanel()
   root.appendChild(capture.root)
-  root.appendChild(dom.button {__rawText = "Importar foto", onclick = function()
+  local status = dom.p {role = "status", ["aria-live"] = "polite"}
+  local footer = dom.div {class = "pw-footer"}
+  local back = helpers.actionButton("Voltar", "back", "quiet")
+  local next = helpers.actionButton("Usar esta foto", "check", "primary")
+  next.disabled = true
+  local busy = false
+  capture.bindConfirmation(next)
+  local function leave() if busy then return end; capture.close(); paperwork.inbox() end
+  back.addEventListener("click", leave)
+  local close = helpers.actionButton("Fechar", "close", "quiet")
+  close.addEventListener("click", function() if busy then return end; capture.close(); editor.hidePanel("modal") end)
+  header.appendChild(close)
+  root.addEventListener("keydown", function(event) if event.key == "Escape" then event.preventDefault(); event.stopPropagation(); leave() end end)
+  next.addEventListener("click", function()
+    if busy then return end
+    busy = true; helpers.buttonBusy(next, true); helpers.buttonBusy(back, true); helpers.buttonBusy(close, true)
+    status.textContent = "Preservando sua foto…"
     local ok, photo = pcall(capture.photo)
-    if not ok then status.textContent = tostring(photo); return end
-    local imported, result = pcall(paperwork.call, "documents", "POST", {name = photo.name, data = photo.data})
-    if not imported then status.textContent = tostring(result); return end
-    capture.close(); paperwork.review({id = result.id, name = result.name})
-  end})
-  root.appendChild(status)
-  root.appendChild(dom.button {__rawText = "Fechar câmera", onclick = function() capture.close(); paperwork.inbox() end})
+    if not root.isConnected then return end
+    if ok then
+      local imported, result = pcall(paperwork.call, "documents", "POST", {name = photo.name, data = photo.data})
+      if not root.isConnected then return end
+      if imported then capture.close(); paperwork.review({id = result.id, name = photo.name}); return end
+      status.textContent = tostring(result)
+    else status.textContent = tostring(photo) end
+    busy = false; helpers.buttonBusy(next, false); helpers.buttonBusy(back, false); helpers.buttonBusy(close, false)
+  end)
+  root.appendChild(status); footer.appendChild(back); footer.appendChild(next); root.appendChild(footer)
+  js.importFromSpace("Library/Paperwork/Scripts/Documents.js").stylePanel(root)
   editor.showPanel("modal", "5vh 3vw", root)
 end
 
 function paperwork.review(document, startPage)
   local root = dom.div {style = "padding:1em;background:Canvas;color:CanvasText;max-height:85vh;overflow:auto"}
-  root.appendChild(dom.h2 {__rawText = document.name})
+  local ui = js.importFromSpace("Library/Paperwork/Scripts/Documents.js")
+  ui.panelHeader(root, "Revisar documento", document.name, 2)
   local sourceLink = dom.a {__rawText = "Abrir original preservado", href = "/.proxy/127.0.0.1:8089/v1/paperwork/documents/" .. document.id .. "/original", target = "_blank", rel = "noopener"}
   root.appendChild(sourceLink)
   root.appendChild(dom.p {__rawText = "Cole a transcrição PFM. Separe páginas com uma linha contendo ---PAGE---. A proposta ainda não altera suas notas."})
@@ -215,7 +259,7 @@ function paperwork.review(document, startPage)
   duplicateAck = dom.input {type = "checkbox"}
   local duplicateLabel = dom.label {__rawText = "Conferi a possível duplicata e quero incorporar como outro registro"}
   duplicateLabel.appendChild(duplicateAck); duplicatePanel.appendChild(duplicateLabel); root.appendChild(duplicatePanel)
-  root.appendChild(dom.button {__rawText = "Incorporar nos diários e notas", onclick = function()
+  root.appendChild(dom.button {class = "pw-primary", __rawText = "Salvar nas notas", onclick = function()
     if not reviewed.checked or not reviewedRun or (documentHelpers.hasUnreviewedEdits(text) or documentHelpers.hasUnreviewedEdits(assignedDate) or documentHelpers.hasUnreviewedEdits(assignedTitle)) then output.textContent = "Interprete o texto atual e confirme a revisão antes de incorporar."; return end
     local ok, result = pcall(paperwork.call, "documents/" .. document.id .. "/incorporate", "POST", {reviewed = true, run_id = reviewedRun, allow_duplicates = duplicateAck.checked})
     output.textContent = ok and js.window.JSON.stringify(js.tojs(result), nil, 2) or tostring(result)
@@ -228,6 +272,7 @@ function paperwork.review(document, startPage)
     output.textContent = ok and js.window.JSON.stringify(js.tojs(result), nil, 2) or tostring(result)
   end})
   root.appendChild(dom.button {__rawText = "Voltar à Inbox", onclick = paperwork.inbox})
+  js.importFromSpace("Library/Paperwork/Scripts/Documents.js").stylePanel(root)
   editor.showPanel("modal", "5vh 3vw", root)
 end
 function paperwork.openDocument(identity, page)
@@ -290,6 +335,7 @@ function paperwork.settings()
   end
   root.appendChild(status)
   root.appendChild(dom.button {__rawText = "Fechar", onclick = function() editor.hidePanel("modal") end})
+  js.importFromSpace("Library/Paperwork/Scripts/Documents.js").stylePanel(root)
   editor.showPanel("modal", "5vh 3vw", root)
 end
 function paperwork.importZoteroIndex()
@@ -307,6 +353,7 @@ function paperwork.importZoteroIndex()
   end})
   root.appendChild(status)
   root.appendChild(dom.button {__rawText = "Fechar", onclick = function() editor.hidePanel("modal") end})
+  js.importFromSpace("Library/Paperwork/Scripts/Documents.js").stylePanel(root)
   editor.showPanel("modal", "5vh 3vw", root)
 end
 function paperwork.registerReference()
@@ -361,6 +408,7 @@ function paperwork.tasks()
   root.appendChild(printButton); root.appendChild(status)
   root.appendChild(dom.button {__rawText = "Atualizar", onclick = paperwork.tasks})
   root.appendChild(dom.button {__rawText = "Fechar", onclick = function() editor.hidePanel("modal") end})
+  js.importFromSpace("Library/Paperwork/Scripts/Documents.js").stylePanel(root)
   editor.showPanel("modal", "5vh 3vw", root)
 end
 command.define {name = "Paperwork: Tarefas locais", run = paperwork.tasks}

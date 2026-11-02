@@ -15,7 +15,7 @@ A implementação usa **Go** no servidor, **TypeScript** como fonte da interface
 Recarregue o SilverBullet após instalar/atualizar a biblioteca. Na paleta de comandos:
 
 1. Abra **Paperwork: Configurações** e selecione a IA (ou transcrição manual).
-2. Abra **Paperwork: Inbox**. Escolha um PDF multipágina, PNG, JPG ou WebP e clique em **Importar original**, ou clique em **Abrir câmera / fotografar página**.
+2. Abra **Paperwork: Inbox**. Escolha um PDF multipágina, PNG, JPG ou WebP e use **Enviar arquivo**, ou escolha **Fotografar página**.
 3. Abra o documento na Inbox. O original e a área de transcrição aparecem lado a lado.
 4. Clique em **Transcrever com provedor configurado**. Para serviço externo, autorize esse documento. Acompanhe em **Consultar processamento** e depois **Carregar proposta existente**.
 5. Confira o texto, a data, os filhos e as pendências. Use **Interpretar e revisar** depois de corrigir o texto.
@@ -25,7 +25,7 @@ A proposta não muda suas notas antes da incorporação. Repetir a mesma incorpo
 
 ### Câmera dentro do SilverBullet
 
-Na Inbox, **Abrir câmera / fotografar página → Ligar câmera → Fotografar → Importar foto**. Autorize a câmera no navegador. Há uma prévia antes de importar; fotografar não envia o documento à IA. A câmera é encerrada depois da captura ou ao fechar o painel.
+Na Inbox, **Fotografar página → Ativar câmera → Fotografar → Usar esta foto**. Autorize a câmera no navegador. Há uma prévia antes de importar; fotografar não envia o documento à IA. A câmera é encerrada depois da captura ou ao fechar o painel.
 
 O acesso direto depende de HTTPS ou localhost e de suporte/permissão do navegador. O seletor alternativo solicita a câmera traseira nativa no celular; se o navegador não oferecer câmera, ele permite escolher uma foto já salva. Permissões do aplicativo/PWA também podem precisar ser liberadas no sistema.
 
